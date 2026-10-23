@@ -28,8 +28,8 @@
 
 ## Tasks
 
-- [ ] Add failing tests for settings compatibility and the shared schedule, then implement both.
-- [ ] Wire the selected rate into Rust collectors, freshness checks, repainting, and chart labels; run Rust tests.
-- [ ] Add the Settings selector and preserve both settings fields on either change.
-- [ ] Add the sensor helper stdin protocol and verify its live cadence with the packaged executable.
-- [ ] Build, package, inspect the running app, and document the options.
+- [x] Add failing tests for settings compatibility and the shared schedule, then implement both.
+- [x] Wire the selected rate into Rust collectors, freshness checks, repainting, and chart labels; run Rust tests.
+- [x] Add the Settings selector and preserve both settings fields on either change.
+- [x] Add the sensor helper stdin protocol and verify its live cadence with the packaged executable.
+- [x] Build, package, launch the app with a saved interval, and document the options.

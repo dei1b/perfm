@@ -675,6 +675,11 @@ fn sidebar(ui: &mut egui::Ui, tab: &mut Tab) {
         });
 }
 
+fn sample_is_live(sampled_at: Option<Instant>, seconds: u64) -> bool {
+    sampled_at
+        .is_some_and(|time| time.elapsed() <= Duration::from_secs(seconds) + Duration::from_secs(3))
+}
+
 fn topbar(ui: &mut egui::Ui, sample: &Sample, has_sample: bool, count: usize, tab: Tab) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
@@ -697,9 +702,7 @@ fn topbar(ui: &mut egui::Ui, sample: &Sample, has_sample: bool, count: usize, ta
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let (status, color) = if !has_sample {
                 ("Starting", colors().muted)
-            } else if sample.sampled_at.is_some_and(|time| {
-                time.elapsed() <= refresh::CURRENT.duration() + Duration::from_secs(3)
-            }) {
+            } else if sample_is_live(sample.sampled_at, refresh::CURRENT.seconds()) {
                 ("Live", colors().success)
             } else {
                 ("Stale", colors().warning)
@@ -1931,7 +1934,9 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
-    use super::{Sensor, cpu_core_clock, preferred_sensor, refresh_label, short_span};
+    use super::{
+        Sensor, cpu_core_clock, preferred_sensor, refresh_label, sample_is_live, short_span,
+    };
 
     #[test]
     fn refresh_and_history_labels_cover_minutes_and_hours() {
@@ -1940,6 +1945,13 @@ mod tests {
         assert_eq!(refresh_label(300), "5 min");
         assert_eq!(short_span(90), "1m30s");
         assert_eq!(short_span(90 * 300), "7h30m");
+    }
+
+    #[test]
+    fn long_refresh_interval_does_not_mark_a_healthy_sample_stale() {
+        let sampled_at = std::time::Instant::now() - std::time::Duration::from_secs(180);
+        assert!(sample_is_live(Some(sampled_at), 300));
+        assert!(!sample_is_live(Some(sampled_at), 1));
     }
 
     #[test]
