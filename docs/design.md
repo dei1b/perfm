@@ -13,9 +13,9 @@ Build a personal Windows laptop performance monitor with a modern, readable inte
 
 ## Product decisions
 
-- Native Rust and egui desktop app. The user-supplied monitoring screenshot guides a near-black canvas, narrow navigation rail, three prominent telemetry panels, restrained color coding, compact numeric tiles, and a full-width processor chart. Perfm uses its own layout and live readings.
+- Native Rust and egui desktop app. The user-supplied monitoring screenshots guide a near-black canvas, narrow navigation rail, four telemetry panels, restrained color coding, compact numeric tiles, and a processor panel with a wide total usage chart beside logical processor bars. Perfm uses its own layout and live readings.
 - Palette: canvas `#08090B`, rail `#0C0D10`, panel `#111215`, border `#313339`, text `#F2F3F5`, with mint storage, blue memory, violet graphics, and amber CPU accents. Thin dividers and square-leaning corners make dense readings easy to scan.
-- Overview shows primary drive capacity, physical memory, NVIDIA graphics, quick CPU/GPU readings, and true per-logical-processor load. All sensors retains search and current/minimum/maximum/average columns. Chart labels describe the available 90-second session history; unavailable hardware data remains explicit.
+- Overview shows primary drive capacity, physical memory, NVIDIA graphics, network traffic, quick CPU/GPU readings, and true per-logical-processor load. All sensors retains search and current/minimum/maximum/average columns. Chart labels describe the available 90-second session history; unavailable hardware data remains explicit.
 - Overview for CPU, NVIDIA GPU, RAM, and drives. Separate sensor table with Current, Min, Max, and Average columns, search, and hardware grouping.
 - A sampler thread polls once per second. The UI repaints once per second, and storage enumeration and WMI sensor queries use slower intervals.
 - Core readings use `sysinfo`, Windows logical disk performance counters, and NVIDIA NVML. Optional LibreHardwareMonitor WMI readings fill hardware-specific temperature, power, fan, and voltage gaps.

@@ -1,6 +1,6 @@
 # Perfm
 
-A native Windows performance monitor written in Rust. It samples once per second and keeps the interface idle between updates. The dark overview has a drive capacity ring, live memory and graphics charts, quick readings, a per-core processor chart, and a network traffic chart. Hover a logical processor bar to see its usage, current clock, and physical-core temperature. If only package temperature is available, the hover card labels it as such. The navigation rail opens a searchable All sensors table with current, minimum, maximum, and average readings for the current Perfm session.
+A native Windows performance monitor written in Rust. It samples once per second and keeps the interface idle between updates. The dark overview has four telemetry cards for drive, memory, graphics, and network activity. The processor panel pairs a 90-second total usage chart with per-logical-processor bars. Hover a logical processor bar to see its usage, current clock, and physical-core temperature. If only package temperature is available, the hover card labels it as such. The navigation rail opens a searchable All sensors table with current, minimum, maximum, and average readings for the current Perfm session.
 
 ## Readings
 

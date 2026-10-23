@@ -952,28 +952,167 @@ fn storage_ring(ui: &mut egui::Ui, used_percent: f32) {
 }
 
 fn cpu_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>) {
-    card(ui, "Processor activity", &sample.cpu_name, PURPLE, |ui| {
-        ui.horizontal(|ui| {
-            main_metric(ui, &format!("{:.0}%", sample.cpu_usage), "total usage");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    RichText::new(format!("{} logical processors", sample.cores.len()))
-                        .size(11.0)
-                        .color(MUTED),
-                );
-            });
+    egui::Frame::new()
+        .fill(PANEL)
+        .stroke(egui::Stroke::new(1.0, BORDER))
+        .corner_radius(egui::CornerRadius::same(7))
+        .inner_margin(egui::Margin::same(14))
+        .show(ui, |ui| {
+            ui.set_min_width((ui.available_width() - 28.0).max(160.0));
+            let width = ui.available_width();
+            if width < 640.0 {
+                cpu_history_panel(ui, sample, history);
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(10.0);
+                logical_processor_panel(ui, sample);
+            } else {
+                let gap = ui.spacing().item_spacing.x;
+                let right_width = (width * 0.29).clamp(210.0, 430.0);
+                let left_width = width - right_width - gap;
+                ui.horizontal_top(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(left_width, 183.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| cpu_history_panel(ui, sample, history),
+                    );
+                    let right = ui.allocate_ui_with_layout(
+                        egui::vec2(right_width, 183.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| logical_processor_panel(ui, sample),
+                    );
+                    let x = right.response.rect.left() - gap / 2.0;
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(x, right.response.rect.top() - 14.0),
+                            egui::pos2(x, right.response.rect.bottom() + 14.0),
+                        ],
+                        egui::Stroke::new(1.0, BORDER.gamma_multiply(0.65)),
+                    );
+                });
+            }
         });
-        ui.add_space(12.0);
-        core_chart(ui, sample);
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Recent total load").size(10.5).color(MUTED));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(RichText::new("Last 90 seconds").size(10.5).color(MUTED));
-            });
+}
+
+fn cpu_history_panel(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>) {
+    ui.horizontal(|ui| {
+        let (mark, _) = ui.allocate_exact_size(egui::vec2(12.0, 13.0), egui::Sense::hover());
+        ui.painter().circle_filled(mark.center(), 4.5, PURPLE);
+        ui.label(
+            RichText::new("Processor activity")
+                .size(13.0)
+                .strong()
+                .color(TEXT),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                RichText::new(format!("{:.0}% now", sample.cpu_usage))
+                    .size(11.0)
+                    .strong()
+                    .color(TEXT),
+            );
         });
-        sparkline(ui, history, CYAN);
     });
+    ui.label(RichText::new(&sample.cpu_name).size(10.5).color(MUTED));
+    cpu_history_chart(ui, history);
+}
+
+fn logical_processor_panel(ui: &mut egui::Ui, sample: &Sample) {
+    ui.label(
+        RichText::new("Per logical processor")
+            .size(12.0)
+            .strong()
+            .color(TEXT),
+    );
+    ui.label(
+        RichText::new(format!("{} logical processors", sample.cores.len()))
+            .size(10.5)
+            .color(MUTED),
+    );
+    core_chart(ui, sample);
+}
+
+fn cpu_history_chart(ui: &mut egui::Ui, history: &VecDeque<Option<f32>>) {
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 143.0),
+        egui::Sense::hover(),
+    );
+    let plot = egui::Rect::from_min_max(
+        rect.min + egui::vec2(27.0, 5.0),
+        rect.max - egui::vec2(5.0, 20.0),
+    );
+    let painter = ui.painter_at(rect);
+    for level in [0, 25, 50, 75, 100] {
+        let y = plot.bottom() - level as f32 / 100.0 * plot.height();
+        painter.line_segment(
+            [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
+            egui::Stroke::new(1.0, Color32::from_rgb(39, 41, 46)),
+        );
+        painter.text(
+            egui::pos2(plot.left() - 6.0, y),
+            egui::Align2::RIGHT_CENTER,
+            level.to_string(),
+            egui::FontId::proportional(9.0),
+            MUTED,
+        );
+    }
+    for tick in 0..=9 {
+        let x = plot.left() + tick as f32 / 9.0 * plot.width();
+        painter.line_segment(
+            [egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())],
+            egui::Stroke::new(1.0, Color32::from_rgb(39, 41, 46)),
+        );
+        let label = if tick == 9 {
+            "Now".to_owned()
+        } else {
+            format!("{}s", 90 - tick * 10)
+        };
+        painter.text(
+            egui::pos2(x, plot.bottom() + 11.0),
+            if tick == 0 {
+                egui::Align2::LEFT_CENTER
+            } else if tick == 9 {
+                egui::Align2::RIGHT_CENTER
+            } else {
+                egui::Align2::CENTER_CENTER
+            },
+            label,
+            egui::FontId::proportional(9.0),
+            MUTED,
+        );
+    }
+    let points: Vec<egui::Pos2> = history
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| {
+            value.map(|value| {
+                egui::pos2(
+                    plot.right() - (history.len() - 1 - index) as f32 / 89.0 * plot.width(),
+                    plot.bottom() - value / 100.0 * plot.height(),
+                )
+            })
+        })
+        .collect();
+    let mut mesh = egui::Mesh::default();
+    for pair in points.windows(2) {
+        let base = mesh.vertices.len() as u32;
+        mesh.colored_vertex(pair[0], CYAN.gamma_multiply(0.28));
+        mesh.colored_vertex(pair[1], CYAN.gamma_multiply(0.28));
+        mesh.colored_vertex(
+            egui::pos2(pair[1].x, plot.bottom()),
+            CYAN.gamma_multiply(0.03),
+        );
+        mesh.colored_vertex(
+            egui::pos2(pair[0].x, plot.bottom()),
+            CYAN.gamma_multiply(0.03),
+        );
+        mesh.add_triangle(base, base + 1, base + 2);
+        mesh.add_triangle(base, base + 2, base + 3);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+    if points.len() >= 2 {
+        painter.add(egui::Shape::line(points, egui::Stroke::new(1.8, CYAN)));
+    }
 }
 
 fn network_card(
@@ -1088,28 +1227,14 @@ fn network_chart(
 fn core_chart(ui: &mut egui::Ui, sample: &Sample) {
     let cores = &sample.cores;
     let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 176.0),
+        egui::vec2(ui.available_width(), 143.0),
         egui::Sense::hover(),
     );
     let painter = ui.painter_at(rect);
     let plot = egui::Rect::from_min_max(
-        rect.min + egui::vec2(29.0, 6.0),
-        rect.max - egui::vec2(4.0, 25.0),
+        rect.min + egui::vec2(2.0, 5.0),
+        rect.max - egui::vec2(2.0, 20.0),
     );
-    for level in [0, 25, 50, 75, 100] {
-        let y = plot.bottom() - level as f32 / 100.0 * plot.height();
-        painter.line_segment(
-            [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
-            egui::Stroke::new(1.0, Color32::from_rgb(39, 41, 46)),
-        );
-        painter.text(
-            egui::pos2(plot.left() - 5.0, y),
-            egui::Align2::RIGHT_CENTER,
-            format!("{level}"),
-            egui::FontId::proportional(9.0),
-            MUTED,
-        );
-    }
     if cores.is_empty() {
         painter.text(
             plot.center(),
@@ -1121,7 +1246,7 @@ fn core_chart(ui: &mut egui::Ui, sample: &Sample) {
         return;
     }
     let slot = plot.width() / cores.len() as f32;
-    let bar_width = (slot * 0.56).clamp(2.0, 27.0);
+    let bar_width = (slot * 0.60).clamp(2.0, 18.0);
     for (index, usage) in cores.iter().enumerate() {
         let x = plot.left() + slot * (index as f32 + 0.5);
         let hit = egui::Rect::from_min_max(
@@ -1135,9 +1260,9 @@ fn core_chart(ui: &mut egui::Ui, sample: &Sample) {
         );
         if response.hovered() {
             painter.rect_filled(
-                hit.shrink2(egui::vec2(1.0, 4.0)),
+                hit.shrink2(egui::vec2(1.0, 3.0)),
                 4.0,
-                PURPLE.gamma_multiply(0.09),
+                PURPLE.gamma_multiply(0.10),
             );
         }
         let track = egui::Rect::from_min_max(
@@ -1151,13 +1276,15 @@ fn core_chart(ui: &mut egui::Ui, sample: &Sample) {
             track.right_bottom(),
         );
         painter.rect_filled(fill, 2.0, PURPLE);
-        painter.text(
-            egui::pos2(x, plot.bottom() + 10.0),
-            egui::Align2::CENTER_CENTER,
-            format!("{}", index + 1),
-            egui::FontId::proportional(9.0),
-            MUTED,
-        );
+        if cores.len() <= 24 || index % 2 == 0 {
+            painter.text(
+                egui::pos2(x, plot.bottom() + 10.0),
+                egui::Align2::CENTER_CENTER,
+                format!("{}", index + 1),
+                egui::FontId::proportional(9.0),
+                MUTED,
+            );
+        }
         response.on_hover_ui_at_pointer(|ui| {
             let detail = sample.core_details.get(index);
             egui::Frame::new()
