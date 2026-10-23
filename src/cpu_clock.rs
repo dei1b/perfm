@@ -1,7 +1,8 @@
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
+use crate::refresh;
 use serde::Deserialize;
 use wmi::WMIConnection;
 
@@ -25,7 +26,7 @@ impl Default for CpuClock {
 impl CpuClock {
     fn is_fresh(self) -> bool {
         self.updated_at
-            .is_some_and(|updated| updated.elapsed() <= Duration::from_secs(3))
+            .is_some_and(|updated| updated.elapsed() <= refresh::CURRENT.fresh_for(1))
     }
 
     pub fn current_mhz(self) -> Option<u64> {
@@ -95,7 +96,7 @@ pub fn spawn_cpu_clock() -> Arc<RwLock<CpuClock>> {
                 if let Ok(mut state) = shared.write() {
                     *state = clock;
                 }
-                thread::sleep(Duration::from_secs(1).saturating_sub(started.elapsed()));
+                refresh::CURRENT.wait_after(started, 1);
             }
         });
     shared

@@ -6,6 +6,8 @@ telemetry, with a searchable sensor table for detailed readings.
 
 The Settings icon in the navigation rail opens 13 color themes: Perfm Original and the 12 palettes from the color-palettes collection. Selecting a theme updates the interface immediately. Perfm saves the choice in `%LOCALAPPDATA%\Perfm\settings.json` and restores it on the next launch. Each palette keeps the dashboard dark and uses its supplied neutral and accent shades.
 
+Settings also offers dashboard refresh intervals of **1, 2, 5, 10, or 30 seconds**, **1 minute**, and **5 minutes**. The choice is saved beside the theme and changes polling without restarting Perfm. The bundled hardware sensor provider polls no more often than every 2 seconds, and disk performance counters no more often than every 3 seconds; slower selected intervals apply to them as well. History charts hold up to 90 samples and show the time range for the selected interval.
+
 Perfm samples the dashboard once per second, keeps the interface responsive
 while slower hardware queries run in the background, and does not require an
 account, telemetry service, or background daemon.

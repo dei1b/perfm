@@ -1,6 +1,21 @@
 using System.Text.Json;
 using LibreHardwareMonitor.Hardware;
 
+var interval = new SensorInterval(ParseInterval(args.Length > 0 ? args[0] : null));
+var inputThread = new Thread(() =>
+{
+    string? line;
+    while ((line = Console.ReadLine()) is not null)
+    {
+        if (TryParseInterval(line, out var seconds))
+        {
+            Volatile.Write(ref interval.Seconds, seconds);
+            interval.Changed.Set();
+        }
+    }
+}) { IsBackground = true, Name = "perfm-interval-input" };
+inputThread.Start();
+
 var computer = new Computer
 {
     IsCpuEnabled = true,
@@ -20,7 +35,7 @@ try
         foreach (var hardware in computer.Hardware)
             Collect(hardware, readings);
         Console.WriteLine(JsonSerializer.Serialize(readings, SensorJsonContext.Default.ListSensorReading));
-        Thread.Sleep(2000);
+        interval.Changed.WaitOne(TimeSpan.FromSeconds(Math.Max(2, Volatile.Read(ref interval.Seconds))));
     }
 }
 catch (Exception error)
@@ -53,4 +68,20 @@ static void Collect(IHardware hardware, List<SensorReading> readings)
         Collect(child, readings);
 }
 
+static bool TryParseInterval(string? text, out int seconds)
+{
+    if (int.TryParse(text, out seconds) && seconds is 1 or 2 or 5 or 10 or 30 or 60 or 300)
+        return true;
+    seconds = 1;
+    return false;
+}
+
+static int ParseInterval(string? text) => TryParseInterval(text, out var seconds) ? seconds : 1;
+
 record SensorReading(string name, string sensor_type, float? value, string parent);
+
+sealed class SensorInterval(int seconds)
+{
+    public int Seconds = seconds;
+    public AutoResetEvent Changed { get; } = new(false);
+}

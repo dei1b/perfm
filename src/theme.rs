@@ -3,6 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::refresh;
 use eframe::egui::Color32;
 use serde::{Deserialize, Serialize};
 
@@ -254,6 +255,22 @@ pub fn select(index: usize) {
 #[derive(Deserialize, Serialize)]
 struct Settings {
     theme: String,
+    #[serde(default = "default_refresh_seconds")]
+    refresh_seconds: u64,
+}
+
+fn default_refresh_seconds() -> u64 {
+    1
+}
+
+fn read_from(path: &Path) -> Settings {
+    fs::read(path)
+        .ok()
+        .and_then(|content| serde_json::from_slice::<Settings>(&content).ok())
+        .unwrap_or_else(|| Settings {
+            theme: THEMES[0].id.to_owned(),
+            refresh_seconds: 1,
+        })
 }
 
 fn settings_path() -> Option<PathBuf> {
@@ -263,22 +280,34 @@ fn settings_path() -> Option<PathBuf> {
 }
 
 fn load_from(path: &Path) -> usize {
-    fs::read(path)
-        .ok()
-        .and_then(|content| serde_json::from_slice::<Settings>(&content).ok())
-        .and_then(|settings| THEMES.iter().position(|theme| theme.id == settings.theme))
+    THEMES
+        .iter()
+        .position(|theme| theme.id == read_from(path).theme)
         .unwrap_or(0)
 }
 
-fn save_to(path: &Path, index: usize) -> io::Result<()> {
-    let settings = Settings {
-        theme: THEMES[index.min(THEMES.len() - 1)].id.to_owned(),
-    };
+fn load_refresh_from(path: &Path) -> u64 {
+    refresh::normalize(read_from(path).refresh_seconds)
+}
+
+fn write_to(path: &Path, settings: &Settings) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let content = serde_json::to_vec_pretty(&settings)?;
+    let content = serde_json::to_vec_pretty(settings)?;
     fs::write(path, content)
+}
+
+fn save_to(path: &Path, index: usize) -> io::Result<()> {
+    let mut settings = read_from(path);
+    settings.theme = THEMES[index.min(THEMES.len() - 1)].id.to_owned();
+    write_to(path, &settings)
+}
+
+fn save_refresh_to(path: &Path, seconds: u64) -> io::Result<()> {
+    let mut settings = read_from(path);
+    settings.refresh_seconds = refresh::normalize(seconds);
+    write_to(path, &settings)
 }
 
 pub fn load() -> usize {
@@ -291,9 +320,19 @@ pub fn save(index: usize) -> io::Result<()> {
     save_to(&path, index)
 }
 
+pub fn load_refresh() -> u64 {
+    settings_path().map_or(1, |path| load_refresh_from(&path))
+}
+
+pub fn save_refresh(seconds: u64) -> io::Result<()> {
+    let path = settings_path()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is unavailable"))?;
+    save_refresh_to(&path, seconds)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{THEMES, load_from, save_to};
+    use super::{THEMES, load_from, load_refresh_from, save_refresh_to, save_to};
 
     #[test]
     fn palette_selection_survives_restart_and_invalid_settings_fall_back() {
@@ -314,5 +353,35 @@ mod tests {
         for theme in THEMES {
             assert!(ids.insert(theme.id));
         }
+    }
+
+    #[test]
+    fn changing_theme_keeps_existing_refresh_interval() {
+        let path = std::env::temp_dir().join(format!(
+            "perfm-refresh-preservation-test-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, br#"{"theme":"perfm-original","refresh_seconds":5}"#).unwrap();
+        save_to(&path, 2).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["refresh_seconds"], 5);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn refresh_interval_survives_restart_and_keeps_theme() {
+        let path = std::env::temp_dir().join(format!(
+            "perfm-refresh-roundtrip-test-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, br#"{"theme":"purple-teal"}"#).unwrap();
+        assert_eq!(load_refresh_from(&path), 1);
+        save_refresh_to(&path, 300).unwrap();
+        assert_eq!(load_refresh_from(&path), 300);
+        assert_eq!(THEMES[load_from(&path)].id, "purple-teal");
+        save_refresh_to(&path, 999).unwrap();
+        assert_eq!(load_refresh_from(&path), 1);
+        let _ = std::fs::remove_file(path);
     }
 }

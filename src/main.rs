@@ -6,13 +6,14 @@ mod disk_perf;
 mod lhm;
 mod network;
 mod readings;
+mod refresh;
 mod stats;
 mod theme;
 
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::os::windows::process::CommandExt;
-use std::process::{Child, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -135,22 +136,24 @@ impl SensorReader {
     }
 }
 
-fn start_sensor_bridge() -> Option<(Child, ChildStdout)> {
+fn start_sensor_bridge(refresh_seconds: u64) -> Option<(Child, ChildStdout, ChildStdin)> {
     let dir = std::env::current_exe().ok()?.parent()?.join("SensorBridge");
     let executable = dir.join("Perfm.SensorBridge.exe");
     if !executable.is_file() {
         return None;
     }
     let mut child = Command::new(executable)
+        .arg(refresh_seconds.to_string())
         .current_dir(dir)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .creation_flags(0x0800_0000)
         .spawn()
         .ok()?;
     let output = child.stdout.take()?;
-    Some((child, output))
+    let input = child.stdin.take()?;
+    Some((child, output, input))
 }
 
 fn stop_bundled_helper(helper: &mut Option<Child>) {
@@ -219,7 +222,9 @@ fn spawn_sensor_reader(output: Option<ChildStdout>) -> Arc<RwLock<SensorState>> 
                     state.updated_at = Some(Instant::now());
                 }
                 drop(shared);
-                thread::sleep(Duration::from_secs(2));
+                if !online {
+                    thread::sleep(Duration::from_secs(1));
+                }
             }
         });
     shared
@@ -246,7 +251,7 @@ fn collect_sample(
         .map(|state| {
             if state
                 .updated_at
-                .is_some_and(|time| time.elapsed() <= Duration::from_secs(10))
+                .is_some_and(|time| time.elapsed() <= refresh::CURRENT.fresh_for(2))
             {
                 (state.sensors.clone(), state.online)
             } else {
@@ -369,7 +374,7 @@ fn collect_sample(
     }
 }
 
-fn spawn_sampler(output: Option<ChildStdout>) -> Receiver<Sample> {
+fn spawn_sampler(output: Option<ChildStdout>, ctx: egui::Context) -> Receiver<Sample> {
     let (sender, receiver) = mpsc::sync_channel(2);
     thread::spawn(move || {
         let mut system = System::new();
@@ -384,23 +389,28 @@ fn spawn_sampler(output: Option<ChildStdout>) -> Receiver<Sample> {
         };
         let disk_perf = spawn_disk_perf();
         let mut network_sampler = NetworkSampler::new();
-        let mut iteration = 0u64;
+        let mut last_disk_refresh = None::<Instant>;
         loop {
             let started = Instant::now();
+            let refresh_disks =
+                last_disk_refresh.is_none_or(|last| last.elapsed() >= Duration::from_secs(5));
             let sample = collect_sample(
                 &mut system,
                 &mut disks,
                 nvml.as_ref(),
                 &cpu_sources,
-                iteration.is_multiple_of(5),
+                refresh_disks,
                 &disk_perf,
                 &mut network_sampler,
             );
-            iteration = iteration.wrapping_add(1);
+            if refresh_disks {
+                last_disk_refresh = Some(Instant::now());
+            }
             if sender.send(sample).is_err() {
                 break;
             }
-            thread::sleep(Duration::from_secs(1).saturating_sub(started.elapsed()));
+            ctx.request_repaint();
+            refresh::CURRENT.wait_after(started, 1);
         }
     });
     receiver
@@ -408,6 +418,7 @@ fn spawn_sampler(output: Option<ChildStdout>) -> Receiver<Sample> {
 
 struct PerfmApp {
     helper: Option<Child>,
+    sensor_input: Option<ChildStdin>,
     receiver: Receiver<Sample>,
     sample: Sample,
     has_sample: bool,
@@ -421,6 +432,7 @@ struct PerfmApp {
     tab: Tab,
     search: String,
     theme_index: usize,
+    refresh_seconds: u64,
     settings_error: Option<String>,
 }
 
@@ -432,16 +444,19 @@ enum Tab {
 }
 
 impl PerfmApp {
-    fn new() -> Self {
+    fn new(ctx: egui::Context) -> Self {
         let theme_index = theme::load();
+        let refresh_seconds = theme::load_refresh();
         theme::select(theme_index);
-        let (helper, output) = match start_sensor_bridge() {
-            Some((helper, output)) => (Some(helper), Some(output)),
-            None => (None, None),
+        refresh::CURRENT.set(refresh_seconds);
+        let (helper, output, sensor_input) = match start_sensor_bridge(refresh_seconds) {
+            Some((helper, output, input)) => (Some(helper), Some(output), Some(input)),
+            None => (None, None, None),
         };
         Self {
             helper,
-            receiver: spawn_sampler(output),
+            sensor_input,
+            receiver: spawn_sampler(output, ctx),
             sample: Sample::default(),
             has_sample: false,
             cpu_history: VecDeque::with_capacity(90),
@@ -454,6 +469,7 @@ impl PerfmApp {
             tab: Tab::Overview,
             search: String::new(),
             theme_index,
+            refresh_seconds,
             settings_error: None,
         }
     }
@@ -492,10 +508,11 @@ impl Drop for PerfmApp {
 impl eframe::App for PerfmApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.consume_samples();
-        ctx.request_repaint_after(Duration::from_secs(1));
+        ctx.request_repaint_after(refresh::CURRENT.duration());
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let previous_refresh = self.refresh_seconds;
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = colors().bg;
         visuals.window_fill = colors().bg;
@@ -562,6 +579,8 @@ impl eframe::App for PerfmApp {
                                         Tab::Settings => settings_view(
                                             ui,
                                             &mut self.theme_index,
+                                            &mut self.refresh_seconds,
+                                            &mut self.sensor_input,
                                             &mut self.settings_error,
                                         ),
                                     });
@@ -570,6 +589,13 @@ impl eframe::App for PerfmApp {
                 );
             });
         });
+        if self.refresh_seconds != previous_refresh {
+            self.cpu_history.clear();
+            self.gpu_history.clear();
+            self.ram_history.clear();
+            self.download_history.clear();
+            self.upload_history.clear();
+        }
     }
 }
 
@@ -671,10 +697,9 @@ fn topbar(ui: &mut egui::Ui, sample: &Sample, has_sample: bool, count: usize, ta
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let (status, color) = if !has_sample {
                 ("Starting", colors().muted)
-            } else if sample
-                .sampled_at
-                .is_some_and(|time| time.elapsed() <= Duration::from_secs(3))
-            {
+            } else if sample.sampled_at.is_some_and(|time| {
+                time.elapsed() <= refresh::CURRENT.duration() + Duration::from_secs(3)
+            }) {
                 ("Live", colors().success)
             } else {
                 ("Stale", colors().warning)
@@ -694,15 +719,113 @@ fn topbar(ui: &mut egui::Ui, sample: &Sample, has_sample: bool, count: usize, ta
                 });
             ui.add_space(9.0);
             ui.label(
-                RichText::new(format!("{count} readings  ·  1 sec refresh"))
-                    .size(11.0)
-                    .color(colors().muted),
+                RichText::new(format!(
+                    "{count} readings  ·  {} refresh",
+                    refresh_label(refresh::CURRENT.seconds())
+                ))
+                .size(11.0)
+                .color(colors().muted),
             );
         });
     });
 }
 
-fn settings_view(ui: &mut egui::Ui, selected: &mut usize, error: &mut Option<String>) {
+fn refresh_label(seconds: u64) -> String {
+    if seconds >= 60 {
+        format!("{} min", seconds / 60)
+    } else {
+        format!("{seconds} sec")
+    }
+}
+
+fn short_span(seconds: u64) -> String {
+    if seconds >= 3600 {
+        let hours = seconds / 3600;
+        let minutes = seconds % 3600 / 60;
+        if minutes == 0 {
+            format!("{hours}h")
+        } else {
+            format!("{hours}h{minutes}m")
+        }
+    } else if seconds >= 60 {
+        let minutes = seconds / 60;
+        let remainder = seconds % 60;
+        if remainder == 0 {
+            format!("{minutes}m")
+        } else {
+            format!("{minutes}m{remainder}s")
+        }
+    } else {
+        format!("{seconds}s")
+    }
+}
+
+fn history_window_label() -> String {
+    format!("Last {}", short_span(90 * refresh::CURRENT.seconds()))
+}
+
+fn settings_view(
+    ui: &mut egui::Ui,
+    selected: &mut usize,
+    refresh_seconds: &mut u64,
+    sensor_input: &mut Option<ChildStdin>,
+    error: &mut Option<String>,
+) {
+    ui.label(
+        RichText::new("Refresh interval")
+            .size(18.0)
+            .strong()
+            .color(colors().text),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new("Choose how often Perfm samples the dashboard. Hardware providers may use a slower minimum rate.")
+            .size(11.0)
+            .color(colors().muted),
+    );
+    ui.add_space(12.0);
+    let mut new_interval = None;
+    ui.horizontal_wrapped(|ui| {
+        for seconds in refresh::OPTIONS {
+            let active = seconds == *refresh_seconds;
+            let label = refresh_label(seconds);
+            let button =
+                egui::Button::new(RichText::new(label).size(11.0).strong().color(if active {
+                    colors().bg
+                } else {
+                    colors().text
+                }))
+                .fill(if active { colors().nav } else { colors().panel })
+                .stroke(egui::Stroke::new(1.0, colors().border))
+                .corner_radius(6);
+            if ui.add_sized([68.0, 32.0], button).clicked() {
+                new_interval = Some(seconds);
+            }
+        }
+    });
+    if let Some(seconds) = new_interval {
+        *refresh_seconds = seconds;
+        refresh::CURRENT.set(seconds);
+        let helper_failed = sensor_input.as_mut().is_some_and(|input| {
+            writeln!(input, "{seconds}")
+                .and_then(|_| input.flush())
+                .is_err()
+        });
+        if helper_failed {
+            *sensor_input = None;
+        }
+        *error = theme::save_refresh(seconds)
+            .err()
+            .map(|error| error.to_string());
+        if helper_failed {
+            *error = Some(
+                "Could not update the sensor helper; restart Perfm to apply its new rate"
+                    .to_owned(),
+            );
+        }
+        ui.ctx().request_repaint();
+    }
+    ui.add_space(24.0);
     ui.label(
         RichText::new("Appearance")
             .size(18.0)
@@ -743,7 +866,7 @@ fn settings_view(ui: &mut egui::Ui, selected: &mut usize, error: &mut Option<Str
     if let Some(message) = error {
         ui.add_space(8.0);
         ui.label(
-            RichText::new(format!("Could not save the theme: {message}"))
+            RichText::new(format!("Settings error: {message}"))
                 .size(11.0)
                 .color(Color32::from_rgb(230, 106, 106)),
         );
@@ -1275,7 +1398,7 @@ fn cpu_history_chart(ui: &mut egui::Ui, history: &VecDeque<Option<f32>>) {
         let label = if tick == 9 {
             "Now".to_owned()
         } else {
-            format!("{}s", 90 - tick * 10)
+            short_span((90 - tick * 10) as u64 * refresh::CURRENT.seconds())
         };
         painter.text(
             egui::pos2(x, plot.bottom() + 11.0),
@@ -1356,7 +1479,7 @@ fn network_card(
                 "download",
             );
             ui.label(
-                RichText::new("Last 90 seconds")
+                RichText::new(history_window_label())
                     .size(10.0)
                     .color(colors().muted),
             );
@@ -1562,7 +1685,7 @@ fn gpu_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>)
             "GPU usage",
         );
         ui.label(
-            RichText::new("Last 90 seconds")
+            RichText::new(history_window_label())
                 .size(10.0)
                 .color(colors().muted),
         );
@@ -1603,7 +1726,7 @@ fn ram_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>)
         |ui| {
             main_metric(ui, &bytes(sample.ram_used), "used");
             ui.label(
-                RichText::new("Last 90 seconds")
+                RichText::new(history_window_label())
                     .size(10.0)
                     .color(colors().muted),
             );
@@ -1802,13 +1925,22 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Perfm",
         options,
-        Box::new(|_| Ok(Box::new(PerfmApp::new()))),
+        Box::new(|cc| Ok(Box::new(PerfmApp::new(cc.egui_ctx.clone())))),
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Sensor, cpu_core_clock, preferred_sensor};
+    use super::{Sensor, cpu_core_clock, preferred_sensor, refresh_label, short_span};
+
+    #[test]
+    fn refresh_and_history_labels_cover_minutes_and_hours() {
+        assert_eq!(refresh_label(1), "1 sec");
+        assert_eq!(refresh_label(60), "1 min");
+        assert_eq!(refresh_label(300), "5 min");
+        assert_eq!(short_span(90), "1m30s");
+        assert_eq!(short_span(90 * 300), "7h30m");
+    }
 
     #[test]
     fn cpu_clock_fallback_averages_valid_core_readings() {

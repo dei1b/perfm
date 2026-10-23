@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
+use crate::refresh;
 use serde::Deserialize;
 use wmi::WMIConnection;
 
@@ -17,7 +18,7 @@ pub struct PerfRate {
 impl PerfRate {
     pub fn is_fresh(&self) -> bool {
         self.updated_at
-            .is_some_and(|time| time.elapsed() <= Duration::from_secs(10))
+            .is_some_and(|time| time.elapsed() <= refresh::CURRENT.fresh_for(3))
     }
 }
 
@@ -43,6 +44,7 @@ pub fn spawn_disk_perf() -> Arc<RwLock<HashMap<String, PerfRate>>> {
     let _ = thread::Builder::new().name("perfm-disk-io".to_owned()).spawn(move || {
         let mut connection = WMIConnection::new().ok();
         while let Some(shared) = weak.upgrade() {
+            let started = Instant::now();
             if connection.is_none() { connection = WMIConnection::new().ok(); }
             if let Some(wmi) = &connection {
                 match wmi.raw_query::<LogicalDiskCounter>(
@@ -65,7 +67,7 @@ pub fn spawn_disk_perf() -> Arc<RwLock<HashMap<String, PerfRate>>> {
                 }
             }
             drop(shared);
-            thread::sleep(Duration::from_secs(3));
+            refresh::CURRENT.wait_after(started, 3);
         }
     });
     shared
