@@ -1,0 +1,5 @@
+/target
+/bridge/bin
+/bridge/obj
+/dist
+*.pdb
