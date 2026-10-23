@@ -4,15 +4,11 @@ Perfm is a lightweight, native Windows performance monitor written in Rust. It
 provides a focused dashboard for CPU, memory, storage, network, and graphics
 telemetry, with a searchable sensor table for detailed readings.
 
-<<<<<<< HEAD
 The Settings icon in the navigation rail opens 13 color themes: Perfm Original and the 12 palettes from the color-palettes collection. Selecting a theme updates the interface immediately. Perfm saves the choice in `%LOCALAPPDATA%\Perfm\settings.json` and restores it on the next launch. Each palette keeps the dashboard dark and uses its supplied neutral and accent shades.
 
-## Readings
-=======
 Perfm samples the dashboard once per second, keeps the interface responsive
 while slower hardware queries run in the background, and does not require an
 account, telemetry service, or background daemon.
->>>>>>> 33e7ff46f2ad5a2df827ec6009ade49f1b56380a
 
 ## Features
 
@@ -27,6 +23,8 @@ account, telemetry service, or background daemon.
   graphics clock through NVML when supported by the installed driver.
 - **Additional sensors:** temperatures, power, fans, voltages, and other
   hardware readings through the bundled LibreHardwareMonitor bridge.
+- **Focused sensor list:** per-core `Distance to TjMax` diagnostics and RAM
+  timing rows are omitted; actual temperatures and capacity remain.
 - **Sensor history:** current, minimum, maximum, and average values in the
   searchable **All sensors** view.
 - **Explicit unavailable data:** readings that are not exposed by Windows,
@@ -40,8 +38,8 @@ Perfm is currently supported on **64-bit Windows**.
 ### Running the application
 
 - A packaged Perfm build.
-- The .NET 10 runtime for the framework-dependent sensor bridge included in
-  the package.
+- No .NET runtime is needed for the default NativeAOT sensor bridge package.
+  The optional managed bridge package requires the .NET 10 runtime.
 - An NVIDIA driver is required only for NVIDIA-specific telemetry.
 
 ### Building from source
@@ -113,11 +111,20 @@ dist\Perfm-Integrated\
     └── license and third-party notices
 ```
 
-The package is framework-dependent, so the .NET 10 runtime must be installed
-on the target machine. To choose another output directory:
+The default package compiles the sensor bridge to native code, reducing its
+working memory and removing the target-machine .NET runtime requirement. To
+choose another output directory:
 
 ```powershell
 .\scripts\package.ps1 -OutputDirectory C:\Releases\Perfm
+```
+
+If the native bridge is incompatible with a particular sensor provider, build
+the framework-dependent bridge instead (this requires the .NET 10 runtime on
+the target machine):
+
+```powershell
+.\scripts\package.ps1 -BridgeMode Managed -OutputDirectory C:\Releases\Perfm-Managed
 ```
 
 ## How it works
