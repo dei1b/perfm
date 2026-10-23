@@ -37,10 +37,6 @@ impl RefreshRate {
         self.changed.notify_all();
     }
 
-    pub fn duration(&self) -> Duration {
-        Duration::from_secs(self.seconds())
-    }
-
     pub fn fresh_for(&self, minimum_seconds: u64) -> Duration {
         Duration::from_secs(self.seconds().max(minimum_seconds) + 5)
     }

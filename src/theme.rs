@@ -31,41 +31,7 @@ const fn rgb(hex: u32) -> Color32 {
     Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
-#[allow(clippy::too_many_arguments)]
-const fn palette(
-    id: &'static str,
-    name: &'static str,
-    description: &'static str,
-    neutral_900: u32,
-    neutral_800: u32,
-    neutral_700: u32,
-    neutral_300: u32,
-    neutral_50: u32,
-    primary: u32,
-    secondary: u32,
-    storage: u32,
-) -> Theme {
-    Theme {
-        id,
-        name,
-        description,
-        bg: rgb(neutral_900),
-        rail: rgb(neutral_900),
-        panel: rgb(neutral_800),
-        border: rgb(neutral_700),
-        text: rgb(neutral_50),
-        muted: rgb(neutral_300),
-        series_a: rgb(primary),
-        series_b: rgb(secondary),
-        storage: rgb(storage),
-        cpu: rgb(0xF7C948),
-        nav: rgb(primary),
-        success: rgb(0x65D6AD),
-        warning: rgb(0xF7C948),
-    }
-}
-
-pub static THEMES: [Theme; 13] = [
+pub static THEMES: [Theme; 5] = [
     Theme {
         id: "perfm-original",
         name: "Perfm Original",
@@ -84,162 +50,78 @@ pub static THEMES: [Theme; 13] = [
         success: rgb(0x42D09E),
         warning: rgb(0xEEBC76),
     },
-    palette(
-        "cyan-blue-grey",
-        "Cyan + Blue Grey",
-        "Cool cyan on deep slate",
-        0x102A43,
-        0x243B53,
-        0x334E68,
-        0x9FB3C8,
-        0xF0F4F8,
-        0x54D1DB,
-        0x87EAF2,
-        0x38BEC9,
-    ),
-    palette(
-        "blue-yellow",
-        "Blue + Yellow",
-        "Clear blue with vivid gold",
-        0x102A43,
-        0x243B53,
-        0x334E68,
-        0x9FB3C8,
-        0xF0F4F8,
-        0x62B0E8,
-        0xF7C948,
-        0x4098D7,
-    ),
-    palette(
-        "purple-teal",
-        "Purple + Teal",
-        "Violet and fresh teal",
-        0x102A43,
-        0x243B53,
-        0x334E68,
-        0x9FB3C8,
-        0xF0F4F8,
-        0x8888FC,
-        0x65D6AD,
-        0x3EBD93,
-    ),
-    palette(
-        "teal-blue-grey",
-        "Teal + Blue Grey",
-        "Quiet teal on deep slate",
-        0x102A43,
-        0x243B53,
-        0x334E68,
-        0x9FB3C8,
-        0xF0F4F8,
-        0x65D6AD,
-        0x8EEDC7,
-        0x3EBD93,
-    ),
-    palette(
-        "blue-grey",
-        "Blue Grey",
-        "Low-key monochrome blue",
-        0x102A43,
-        0x243B53,
-        0x334E68,
-        0x9FB3C8,
-        0xF0F4F8,
-        0xBCCCDC,
-        0x9FB3C8,
-        0x829AB1,
-    ),
-    palette(
-        "red-yellow-warm",
-        "Red + Yellow",
-        "Warm graphite and vivid red",
-        0x27241D,
-        0x423D33,
-        0x504A40,
-        0xB8B2A7,
-        0xFAF9F7,
-        0xE66A6A,
-        0xF7C948,
-        0xD64545,
-    ),
-    palette(
-        "cyan-warm-grey",
-        "Cyan + Warm Grey",
-        "Cool accents on warm graphite",
-        0x27241D,
-        0x423D33,
-        0x504A40,
-        0xB8B2A7,
-        0xFAF9F7,
-        0x54D1DB,
-        0x87EAF2,
-        0x38BEC9,
-    ),
-    palette(
-        "blue-vivid",
-        "Blue Vivid",
-        "Electric blue with red details",
-        0x1F2933,
-        0x323F4B,
-        0x3E4C59,
-        0x9AA5B1,
-        0xF5F7FA,
-        0x47A3F3,
-        0xF86A6A,
-        0x2186EB,
-    ),
-    palette(
-        "light-blue-vivid",
-        "Light Blue Vivid",
-        "Bright sky blue on cool grey",
-        0x1F2933,
-        0x323F4B,
-        0x3E4C59,
-        0x9AA5B1,
-        0xF5F7FA,
-        0x5ED0FA,
-        0x81DEFD,
-        0x40C3F7,
-    ),
-    palette(
-        "indigo-cool-grey",
-        "Indigo + Cool Grey",
-        "Soft indigo on cool grey",
-        0x1F2933,
-        0x323F4B,
-        0x3E4C59,
-        0x9AA5B1,
-        0xF5F7FA,
-        0x7B93DB,
-        0x98AEEB,
-        0x647ACB,
-    ),
-    palette(
-        "pink-vivid",
-        "Pink Vivid",
-        "Bright pink on cool grey",
-        0x1F2933,
-        0x323F4B,
-        0x3E4C59,
-        0x9AA5B1,
-        0xF5F7FA,
-        0xF364A2,
-        0xFF8CBA,
-        0xE8368F,
-    ),
-    palette(
-        "green-pure-grey",
-        "Green + Pure Grey",
-        "Leaf green on neutral grey",
-        0x222222,
-        0x3B3B3B,
-        0x515151,
-        0xB1B1B1,
-        0xF7F7F7,
-        0x7BC47F,
-        0xA3D9A5,
-        0x57AE5B,
-    ),
+    Theme {
+        id: "pastel-soft",
+        name: "Pastel & Soft",
+        description: "Lavender, sky, and mint on midnight blue",
+        bg: rgb(0x111827),
+        rail: rgb(0x111827),
+        panel: rgb(0x1D2C46),
+        border: rgb(0x3A5278),
+        text: rgb(0xF2F3F5),
+        muted: rgb(0xB8C7DF),
+        series_a: rgb(0x71D5FF),
+        series_b: rgb(0xD88CF2),
+        storage: rgb(0xD88CF2),
+        cpu: rgb(0xD88CF2),
+        nav: rgb(0xD88CF2),
+        success: rgb(0x54E6C1),
+        warning: rgb(0x71D5FF),
+    },
+    Theme {
+        id: "neutral-earthy",
+        name: "Neutral & Earthy",
+        description: "Sage, teal, and ochre on deep green",
+        bg: rgb(0x151A16),
+        rail: rgb(0x151A16),
+        panel: rgb(0x242C25),
+        border: rgb(0x465448),
+        text: rgb(0xF2F3F0),
+        muted: rgb(0xC0C9B8),
+        series_a: rgb(0x6DD1BE),
+        series_b: rgb(0xF2BB65),
+        storage: rgb(0xB5D28A),
+        cpu: rgb(0xF2BB65),
+        nav: rgb(0xB5D28A),
+        success: rgb(0x6DD1BE),
+        warning: rgb(0xF2BB65),
+    },
+    Theme {
+        id: "bold-high-contrast",
+        name: "Bold & High Contrast",
+        description: "Fuchsia, lime, and cyan on deep violet",
+        bg: rgb(0x140F1B),
+        rail: rgb(0x140F1B),
+        panel: rgb(0x241A2C),
+        border: rgb(0x493452),
+        text: rgb(0xF7F3F9),
+        muted: rgb(0xC6B8CE),
+        series_a: rgb(0x17DAE5),
+        series_b: rgb(0xF02BCC),
+        storage: rgb(0xF02BCC),
+        cpu: rgb(0xF02BCC),
+        nav: rgb(0xF02BCC),
+        success: rgb(0x85F04B),
+        warning: rgb(0x85F04B),
+    },
+    Theme {
+        id: "minimalist-modern",
+        name: "Minimalist & Modern",
+        description: "Blue, cyan, and green on charcoal",
+        bg: rgb(0x111417),
+        rail: rgb(0x111417),
+        panel: rgb(0x1B2026),
+        border: rgb(0x3A4653),
+        text: rgb(0xF2F4F6),
+        muted: rgb(0xAFBAC5),
+        series_a: rgb(0x10CDE3),
+        series_b: rgb(0x168BFF),
+        storage: rgb(0x168BFF),
+        cpu: rgb(0x168BFF),
+        nav: rgb(0x168BFF),
+        success: rgb(0x5DE47A),
+        warning: rgb(0x10CDE3),
+    },
 ];
 
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
@@ -339,8 +221,10 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("perfm-theme-test-{}.json", std::process::id()));
         assert_eq!(load_from(&path), 0);
-        save_to(&path, 11).unwrap();
-        assert_eq!(load_from(&path), 11);
+        save_to(&path, 4).unwrap();
+        assert_eq!(load_from(&path), 4);
+        std::fs::write(&path, br#"{"theme":"purple-teal"}"#).unwrap();
+        assert_eq!(load_from(&path), 0);
         std::fs::write(&path, br#"{"theme":"not-a-theme"}"#).unwrap();
         assert_eq!(load_from(&path), 0);
         let _ = std::fs::remove_file(path);
@@ -348,10 +232,66 @@ mod tests {
 
     #[test]
     fn all_supplied_palettes_have_unique_stable_ids() {
-        assert_eq!(THEMES.len(), 13);
+        assert_eq!(THEMES.len(), 5);
+        assert_eq!(
+            THEMES.iter().map(|theme| theme.id).collect::<Vec<_>>(),
+            [
+                "perfm-original",
+                "pastel-soft",
+                "neutral-earthy",
+                "bold-high-contrast",
+                "minimalist-modern",
+            ]
+        );
         let mut ids = std::collections::HashSet::new();
         for theme in THEMES {
             assert!(ids.insert(theme.id));
+        }
+    }
+
+    #[test]
+    fn supplied_theme_colors_match_requested_hex_values() {
+        use super::rgb;
+
+        let expected = [
+            (0x111827, 0x1D2C46, 0x3A5278, 0xD88CF2, 0x71D5FF, 0x54E6C1),
+            (0x151A16, 0x242C25, 0x465448, 0xB5D28A, 0x6DD1BE, 0xF2BB65),
+            (0x140F1B, 0x241A2C, 0x493452, 0xF02BCC, 0x85F04B, 0x17DAE5),
+            (0x111417, 0x1B2026, 0x3A4653, 0x168BFF, 0x10CDE3, 0x5DE47A),
+        ];
+        for (theme, (bg, surface, border, main, support_a, support_b)) in
+            THEMES[1..].iter().zip(expected)
+        {
+            assert_eq!(theme.bg, rgb(bg), "{} background", theme.id);
+            assert_eq!(theme.panel, rgb(surface), "{} surface", theme.id);
+            assert_eq!(theme.border, rgb(border), "{} border", theme.id);
+            assert_eq!(theme.nav, rgb(main), "{} main accent", theme.id);
+            let accent_roles = [
+                theme.series_a,
+                theme.series_b,
+                theme.storage,
+                theme.cpu,
+                theme.nav,
+                theme.success,
+                theme.warning,
+            ];
+            assert!(
+                accent_roles.contains(&rgb(support_a)),
+                "{} supporting accent A",
+                theme.id
+            );
+            assert!(
+                accent_roles.contains(&rgb(support_b)),
+                "{} supporting accent B",
+                theme.id
+            );
+            assert!(
+                accent_roles
+                    .iter()
+                    .all(|color| [rgb(main), rgb(support_a), rgb(support_b)].contains(color)),
+                "{} contains an accent outside the supplied palette",
+                theme.id
+            );
         }
     }
 
@@ -375,11 +315,11 @@ mod tests {
             "perfm-refresh-roundtrip-test-{}.json",
             std::process::id()
         ));
-        std::fs::write(&path, br#"{"theme":"purple-teal"}"#).unwrap();
+        std::fs::write(&path, br#"{"theme":"pastel-soft"}"#).unwrap();
         assert_eq!(load_refresh_from(&path), 1);
         save_refresh_to(&path, 300).unwrap();
         assert_eq!(load_refresh_from(&path), 300);
-        assert_eq!(THEMES[load_from(&path)].id, "purple-teal");
+        assert_eq!(THEMES[load_from(&path)].id, "pastel-soft");
         save_refresh_to(&path, 999).unwrap();
         assert_eq!(load_refresh_from(&path), 1);
         let _ = std::fs::remove_file(path);

@@ -24,20 +24,22 @@ impl StatsBook {
         if !value.is_finite() {
             return;
         }
-        self.values
-            .entry(key.to_owned())
-            .and_modify(|stats| {
-                stats.min = stats.min.min(value);
-                stats.max = stats.max.max(value);
-                stats.sum += value;
-                stats.count += 1;
-            })
-            .or_insert(Stats {
-                min: value,
-                max: value,
-                sum: value,
-                count: 1,
-            });
+        if let Some(stats) = self.values.get_mut(key) {
+            stats.min = stats.min.min(value);
+            stats.max = stats.max.max(value);
+            stats.sum += value;
+            stats.count += 1;
+        } else {
+            self.values.insert(
+                key.to_owned(),
+                Stats {
+                    min: value,
+                    max: value,
+                    sum: value,
+                    count: 1,
+                },
+            );
+        }
     }
 
     pub fn get(&self, key: &str) -> Option<&Stats> {

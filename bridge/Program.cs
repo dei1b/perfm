@@ -29,11 +29,13 @@ var computer = new Computer
 try
 {
     computer.Open();
+    var readings = new List<SensorReading>(160);
+    var sensorTypeNames = new Dictionary<SensorType, string>();
     while (true)
     {
-        var readings = new List<SensorReading>();
+        readings.Clear();
         foreach (var hardware in computer.Hardware)
-            Collect(hardware, readings);
+            Collect(hardware, readings, sensorTypeNames);
         Console.WriteLine(JsonSerializer.Serialize(readings, SensorJsonContext.Default.ListSensorReading));
         interval.Changed.WaitOne(TimeSpan.FromSeconds(Math.Max(2, Volatile.Read(ref interval.Seconds))));
     }
@@ -48,9 +50,10 @@ finally
     computer.Close();
 }
 
-static void Collect(IHardware hardware, List<SensorReading> readings)
+static void Collect(IHardware hardware, List<SensorReading> readings, Dictionary<SensorType, string> sensorTypeNames)
 {
     hardware.Update();
+    var parent = hardware.Identifier.ToString();
     foreach (var sensor in hardware.Sensors)
     {
         if (sensor.SensorType == SensorType.Timing ||
@@ -58,14 +61,19 @@ static void Collect(IHardware hardware, List<SensorReading> readings)
             continue;
 
         var value = sensor.Value;
+        if (!sensorTypeNames.TryGetValue(sensor.SensorType, out var sensorTypeName))
+        {
+            sensorTypeName = sensor.SensorType.ToString();
+            sensorTypeNames.Add(sensor.SensorType, sensorTypeName);
+        }
         readings.Add(new SensorReading(
             sensor.Name,
-            sensor.SensorType.ToString(),
+            sensorTypeName,
             value.HasValue && float.IsFinite(value.Value) ? value : null,
-            hardware.Identifier.ToString()));
+            parent));
     }
     foreach (var child in hardware.SubHardware)
-        Collect(child, readings);
+        Collect(child, readings, sensorTypeNames);
 }
 
 static bool TryParseInterval(string? text, out int seconds)
@@ -78,7 +86,7 @@ static bool TryParseInterval(string? text, out int seconds)
 
 static int ParseInterval(string? text) => TryParseInterval(text, out var seconds) ? seconds : 1;
 
-record SensorReading(string name, string sensor_type, float? value, string parent);
+readonly record struct SensorReading(string name, string sensor_type, float? value, string parent);
 
 sealed class SensorInterval(int seconds)
 {

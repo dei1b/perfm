@@ -49,7 +49,7 @@ struct Sample {
     disks: Vec<Drive>,
     network: NetworkSample,
     gpus: Vec<Gpu>,
-    sensors: Vec<Sensor>,
+    sensors: Arc<Vec<Sensor>>,
     sensor_online: bool,
 }
 
@@ -94,12 +94,12 @@ struct CoreDetail {
 
 struct SensorReader {
     output: Option<BufReader<ChildStdout>>,
-    cached: Vec<Sensor>,
+    line: String,
 }
 
 #[derive(Default)]
 struct SensorState {
-    sensors: Vec<Sensor>,
+    sensors: Arc<Vec<Sensor>>,
     online: bool,
     updated_at: Option<Instant>,
 }
@@ -114,25 +114,23 @@ impl SensorReader {
     fn new(output: Option<ChildStdout>) -> Self {
         Self {
             output: output.map(BufReader::new),
-            cached: Vec::new(),
+            line: String::new(),
         }
     }
 
-    fn read(&mut self) -> (&[Sensor], bool) {
+    fn read(&mut self) -> Vec<Sensor> {
         if let Some(output) = &mut self.output {
-            let mut line = String::new();
-            match output.read_line(&mut line) {
+            self.line.clear();
+            match output.read_line(&mut self.line) {
                 Ok(0) | Err(_) => {
                     self.output = None;
-                    self.cached.clear();
                 }
                 Ok(_) => {
-                    self.cached = lhm::parse_sensor_line(&line).unwrap_or_default();
+                    return lhm::parse_sensor_line(&self.line).unwrap_or_default();
                 }
             }
         }
-        let online = !self.cached.is_empty();
-        (&self.cached, online)
+        Vec::new()
     }
 }
 
@@ -172,31 +170,40 @@ fn preferred_sensor(sensors: &[Sensor], sensor_type: &str, names: &[&str]) -> Op
             .find(|sensor| {
                 sensor.sensor_type.eq_ignore_ascii_case(sensor_type)
                     && sensor.name.eq_ignore_ascii_case(target)
-                    && sensor.parent.to_ascii_lowercase().contains("cpu")
+                    && contains_ascii_case_insensitive(&sensor.parent, b"cpu")
             })
             .and_then(|sensor| sensor.value.filter(|value| *value > 0.0))
     })
 }
 
 fn cpu_core_clock(sensors: &[Sensor]) -> Option<u64> {
-    let clocks: Vec<f32> = sensors
+    let (sum, count) = sensors
         .iter()
-        .filter(|sensor| {
-            sensor.sensor_type.eq_ignore_ascii_case("Clock")
-                && sensor.parent.to_ascii_lowercase().contains("cpu")
+        .fold((0.0f32, 0usize), |(sum, count), sensor| {
+            let is_core_clock = sensor.sensor_type.eq_ignore_ascii_case("Clock")
+                && contains_ascii_case_insensitive(&sensor.parent, b"cpu")
                 && (sensor.name.starts_with("P-Core")
                     || sensor.name.starts_with("E-Core")
                     || sensor.name.starts_with("Core #")
                     || sensor.name.starts_with("CPU Core #"))
-                && !sensor.name.contains("(Effective)")
-        })
-        .filter_map(|sensor| {
-            sensor
+                && !sensor.name.contains("(Effective)");
+            if let Some(value) = sensor
                 .value
-                .filter(|value| value.is_finite() && *value > 0.0)
-        })
-        .collect();
-    (!clocks.is_empty()).then(|| (clocks.iter().sum::<f32>() / clocks.len() as f32).round() as u64)
+                .filter(|value| is_core_clock && value.is_finite() && *value > 0.0)
+            {
+                (sum + value, count + 1)
+            } else {
+                (sum, count)
+            }
+        });
+    (count > 0).then(|| (sum / count as f32).round() as u64)
+}
+
+fn contains_ascii_case_insensitive(haystack: &str, needle: &[u8]) -> bool {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 fn physical_core_reading(sensors: &[Sensor], sensor_type: &str, name: &str) -> Option<f32> {
@@ -215,9 +222,10 @@ fn spawn_sensor_reader(output: Option<ChildStdout>) -> Arc<RwLock<SensorState>> 
         .spawn(move || {
             let mut reader = SensorReader::new(output);
             while let Some(shared) = weak.upgrade() {
-                let (sensors, online) = reader.read();
+                let sensors = reader.read();
+                let online = !sensors.is_empty();
                 if let Ok(mut state) = shared.write() {
-                    state.sensors = sensors.to_vec();
+                    state.sensors = Arc::new(sensors);
                     state.online = online;
                     state.updated_at = Some(Instant::now());
                 }
@@ -239,7 +247,7 @@ fn collect_sample(
     disk_perf: &Arc<RwLock<HashMap<String, PerfRate>>>,
     network_sampler: &mut NetworkSampler,
 ) -> Sample {
-    system.refresh_cpu_all();
+    system.refresh_cpu_usage();
     system.refresh_memory();
     if refresh_disks {
         disks.refresh(true);
@@ -255,7 +263,7 @@ fn collect_sample(
             {
                 (state.sensors.clone(), state.online)
             } else {
-                (Vec::new(), false)
+                (Arc::default(), false)
             }
         })
         .unwrap_or_default();
@@ -508,7 +516,13 @@ impl Drop for PerfmApp {
 impl eframe::App for PerfmApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.consume_samples();
-        ctx.request_repaint_after(refresh::CURRENT.duration());
+        if let Some(sampled_at) = self.sample.sampled_at {
+            let stale_after = Duration::from_secs(refresh::CURRENT.seconds() + 3);
+            let until_stale = stale_after.saturating_sub(sampled_at.elapsed());
+            if !until_stale.is_zero() {
+                ctx.request_repaint_after(until_stale + Duration::from_millis(10));
+            }
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

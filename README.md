@@ -4,13 +4,14 @@ Perfm is a lightweight, native Windows performance monitor written in Rust. It
 provides a focused dashboard for CPU, memory, storage, network, and graphics
 telemetry, with a searchable sensor table for detailed readings.
 
-The Settings icon in the navigation rail opens 13 color themes: Perfm Original and the 12 palettes from the color-palettes collection. Selecting a theme updates the interface immediately. Perfm saves the choice in `%LOCALAPPDATA%\Perfm\settings.json` and restores it on the next launch. Each palette keeps the dashboard dark and uses its supplied neutral and accent shades.
+The Settings icon in the navigation rail opens five color themes: Perfm Original, Pastel & Soft, Neutral & Earthy, Bold & High Contrast, and Minimalist & Modern. Selecting a theme updates the interface immediately. Perfm saves the choice in `%LOCALAPPDATA%\Perfm\settings.json` and restores it on the next launch. A saved selection from a removed theme returns to Perfm Original.
 
 Settings also offers dashboard refresh intervals of **1, 2, 5, 10, or 30 seconds**, **1 minute**, and **5 minutes**. The choice is saved beside the theme and changes polling without restarting Perfm. The bundled hardware sensor provider polls no more often than every 2 seconds, and disk performance counters no more often than every 3 seconds; slower selected intervals apply to them as well. History charts hold up to 90 samples and show the time range for the selected interval.
 
-Perfm samples the dashboard once per second, keeps the interface responsive
+Perfm samples at the selected refresh interval, keeps the interface responsive
 while slower hardware queries run in the background, and does not require an
-account, telemetry service, or background daemon.
+account, telemetry service, or background daemon. A 5-second interval uses less
+CPU than 1-second monitoring when immediate updates are not needed.
 
 ## Features
 

@@ -1,4 +1,4 @@
-use crate::Sample;
+use crate::{Sample, contains_ascii_case_insensitive};
 
 #[derive(Clone)]
 pub struct Reading {
@@ -311,13 +311,15 @@ pub fn collect_readings(sample: &Sample) -> Vec<Reading> {
         );
     }
 
-    for sensor in &sample.sensors {
-        let parent = sensor.parent.to_ascii_lowercase();
-        let group = if parent.contains("cpu") {
+    for sensor in sample.sensors.iter() {
+        let cpu_parent = contains_ascii_case_insensitive(&sensor.parent, b"cpu");
+        let group = if cpu_parent {
             "Processor · additional sensors"
-        } else if parent.contains("gpu") {
+        } else if contains_ascii_case_insensitive(&sensor.parent, b"gpu") {
             "Graphics · additional sensors"
-        } else if parent.contains("nvme") || parent.contains("hdd") {
+        } else if contains_ascii_case_insensitive(&sensor.parent, b"nvme")
+            || contains_ascii_case_insensitive(&sensor.parent, b"hdd")
+        {
             "Drives · additional sensors"
         } else {
             "System · additional sensors"
@@ -348,7 +350,7 @@ pub fn collect_readings(sample: &Sample) -> Vec<Reading> {
         let value = sensor.value.filter(|value| {
             !(sensor.sensor_type == "Power"
                 && sensor.name.eq_ignore_ascii_case("CPU Package")
-                && parent.contains("cpu")
+                && cpu_parent
                 && *value <= 0.0)
         });
         add(
@@ -414,7 +416,8 @@ mod tests {
                 sensor_type: "Power".to_owned(),
                 value: Some(0.0),
                 parent: "/intelcpu/0".to_owned(),
-            }],
+            }]
+            .into(),
             ..Default::default()
         };
         let reading = collect_readings(&sample)
@@ -440,7 +443,8 @@ mod tests {
                     value: Some(134.0),
                     parent: "/gpu-nvidia/0".to_owned(),
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         };
         let readings = collect_readings(&sample);
