@@ -1044,6 +1044,7 @@ fn overview(
             &format!("{:.0}%", sample.cpu_usage),
             "Across all logical processors",
             colors().cpu,
+            CardIcon::Cpu,
         );
         stat_tile(
             &mut columns[1],
@@ -1059,6 +1060,7 @@ fn overview(
                 "Current CPU frequency"
             },
             colors().series_a,
+            CardIcon::Clock,
         );
         stat_tile(
             &mut columns[2],
@@ -1066,6 +1068,7 @@ fn overview(
             &reading(sample.cpu_temp, " °C"),
             "Package sensor",
             colors().series_b,
+            CardIcon::Thermometer,
         );
         stat_tile(
             &mut columns[3],
@@ -1073,6 +1076,7 @@ fn overview(
             &reading(sample.gpus.first().and_then(|gpu| gpu.power), " W"),
             "NVIDIA reported draw",
             colors().storage,
+            CardIcon::Power,
         );
     });
     ui.add_space(18.0);
@@ -1144,11 +1148,136 @@ fn reading(value: Option<f32>, suffix: &str) -> String {
         .unwrap_or_else(|| "Unavailable".to_owned())
 }
 
+#[derive(Clone, Copy)]
+enum CardIcon {
+    Disk,
+    Memory,
+    Gpu,
+    Network,
+    Cpu,
+    Clock,
+    Thermometer,
+    Power,
+}
+
+fn card_icon(ui: &mut egui::Ui, icon: CardIcon, color: Color32, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let scale = size / 24.0;
+    let point = |x: f32, y: f32| rect.min + egui::vec2(x * scale, y * scale);
+    let stroke = egui::Stroke::new(1.8 * scale, color);
+    let line = |a: (f32, f32), b: (f32, f32)| {
+        painter.line_segment([point(a.0, a.1), point(b.0, b.1)], stroke);
+    };
+    let outline = |points: &[(f32, f32)]| {
+        painter.add(egui::Shape::line(
+            points.iter().map(|&(x, y)| point(x, y)).collect(),
+            stroke,
+        ));
+    };
+
+    match icon {
+        CardIcon::Disk => {
+            outline(&[
+                (5.0, 5.0),
+                (19.0, 5.0),
+                (21.0, 17.0),
+                (3.0, 17.0),
+                (5.0, 5.0),
+            ]);
+            line((4.0, 14.0), (20.0, 14.0));
+            line((6.0, 20.0), (18.0, 20.0));
+            painter.circle_filled(point(17.0, 15.5), 0.8 * scale, color);
+        }
+        CardIcon::Memory => {
+            painter.rect_stroke(
+                egui::Rect::from_min_max(point(3.0, 6.0), point(21.0, 17.0)),
+                egui::CornerRadius::same(2),
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            for x in [6.0, 10.0, 14.0, 18.0] {
+                line((x, 9.0), (x, 13.0));
+                line((x, 17.0), (x, 20.0));
+            }
+        }
+        CardIcon::Gpu | CardIcon::Cpu => {
+            painter.rect_stroke(
+                egui::Rect::from_min_max(point(5.0, 5.0), point(19.0, 19.0)),
+                egui::CornerRadius::same(2),
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            for at in [8.0, 12.0, 16.0] {
+                line((at, 2.0), (at, 5.0));
+                line((at, 19.0), (at, 22.0));
+                line((2.0, at), (5.0, at));
+                line((19.0, at), (22.0, at));
+            }
+            if matches!(icon, CardIcon::Gpu) {
+                painter.circle_stroke(point(12.0, 12.0), 3.5 * scale, stroke);
+                painter.circle_filled(point(12.0, 12.0), scale, color);
+            } else {
+                painter.rect_stroke(
+                    egui::Rect::from_min_max(point(9.0, 9.0), point(15.0, 15.0)),
+                    egui::CornerRadius::same(1),
+                    stroke,
+                    egui::StrokeKind::Middle,
+                );
+            }
+        }
+        CardIcon::Network => {
+            for radius in [11.0f32, 7.5, 4.0] {
+                let arc = (0..=12)
+                    .map(|step| {
+                        let angle = (210.0 + step as f32 * 10.0).to_radians();
+                        point(12.0 + radius * angle.cos(), 20.0 + radius * angle.sin())
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(arc, stroke));
+            }
+            painter.circle_filled(point(12.0, 20.0), 1.4 * scale, color);
+        }
+        CardIcon::Clock => {
+            painter.circle_stroke(point(12.0, 12.0), 9.0 * scale, stroke);
+            line((12.0, 12.0), (15.5, 7.5));
+            painter.circle_filled(point(12.0, 12.0), scale, color);
+            for (from, to) in [
+                ((12.0, 3.0), (12.0, 5.0)),
+                ((3.0, 12.0), (5.0, 12.0)),
+                ((19.0, 12.0), (21.0, 12.0)),
+            ] {
+                line(from, to);
+            }
+        }
+        CardIcon::Thermometer => {
+            line((9.0, 5.0), (9.0, 15.0));
+            line((15.0, 5.0), (15.0, 15.0));
+            outline(&[(9.0, 5.0), (10.0, 3.5), (14.0, 3.5), (15.0, 5.0)]);
+            painter.circle_stroke(point(12.0, 17.0), 4.0 * scale, stroke);
+            line((12.0, 9.0), (12.0, 17.0));
+            painter.circle_filled(point(12.0, 17.0), 1.6 * scale, color);
+        }
+        CardIcon::Power => {
+            outline(&[
+                (13.5, 2.0),
+                (5.0, 13.0),
+                (11.0, 13.0),
+                (9.5, 22.0),
+                (19.0, 10.0),
+                (13.0, 10.0),
+                (13.5, 2.0),
+            ]);
+        }
+    }
+}
+
 fn card(
     ui: &mut egui::Ui,
     title: &str,
     subtitle: &str,
     accent: Color32,
+    icon: CardIcon,
     body: impl FnOnce(&mut egui::Ui),
 ) {
     egui::Frame::new()
@@ -1159,18 +1288,18 @@ fn card(
         .show(ui, |ui| {
             ui.set_min_width((ui.available_width() - 30.0).max(160.0));
             ui.set_min_height(318.0);
-            ui.horizontal(|ui| {
-                let (mark, _) =
-                    ui.allocate_exact_size(egui::vec2(10.0, 12.0), egui::Sense::hover());
-                ui.painter().circle_filled(mark.center(), 3.0, accent);
-                ui.label(
-                    RichText::new(title)
-                        .size(13.0)
-                        .strong()
-                        .color(colors().text),
-                );
+            ui.horizontal_top(|ui| {
+                card_icon(ui, icon, accent, 26.0);
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new(title)
+                            .size(13.0)
+                            .strong()
+                            .color(colors().text),
+                    );
+                    ui.label(RichText::new(subtitle).size(10.5).color(colors().muted));
+                });
             });
-            ui.label(RichText::new(subtitle).size(10.5).color(colors().muted));
             ui.add_space(9.0);
             ui.separator();
             ui.add_space(7.0);
@@ -1191,7 +1320,14 @@ fn main_metric(ui: &mut egui::Ui, value: &str, caption: &str) {
     });
 }
 
-fn stat_tile(ui: &mut egui::Ui, title: &str, value: &str, description: &str, accent: Color32) {
+fn stat_tile(
+    ui: &mut egui::Ui,
+    title: &str,
+    value: &str,
+    description: &str,
+    accent: Color32,
+    icon: CardIcon,
+) {
     egui::Frame::new()
         .fill(colors().panel)
         .stroke(egui::Stroke::new(1.0, colors().border))
@@ -1200,7 +1336,10 @@ fn stat_tile(ui: &mut egui::Ui, title: &str, value: &str, description: &str, acc
         .show(ui, |ui| {
             ui.set_min_width((ui.available_width() - 26.0).max(115.0));
             ui.set_min_height(92.0);
-            ui.label(RichText::new(title).size(11.0).color(colors().muted));
+            ui.horizontal(|ui| {
+                card_icon(ui, icon, accent, 18.0);
+                ui.label(RichText::new(title).size(11.0).color(colors().muted));
+            });
             ui.add_space(7.0);
             ui.label(RichText::new(value).size(21.0).strong().color(accent));
             ui.label(RichText::new(description).size(10.0).color(colors().muted));
@@ -1485,6 +1624,7 @@ fn network_card(
         "Network traffic",
         &format!("{connected} connected · all interfaces"),
         colors().series_a,
+        CardIcon::Network,
         |ui| {
             main_metric(
                 ui,
@@ -1693,45 +1833,52 @@ fn gpu_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>)
     let title = gpu
         .map(|gpu| gpu.name.as_str())
         .unwrap_or("No NVIDIA GPU detected");
-    card(ui, "Graphics load", title, colors().series_b, |ui| {
-        main_metric(
-            ui,
-            &gpu.and_then(|gpu| gpu.usage)
-                .map(|value| format!("{value:.0}%"))
-                .unwrap_or_else(|| "—".to_owned()),
-            "GPU usage",
-        );
-        ui.label(
-            RichText::new(history_window_label())
-                .size(10.0)
-                .color(colors().muted),
-        );
-        sparkline(ui, history, colors().series_b);
-        metric_row(
-            ui,
-            "Temperature",
-            &reading(gpu.and_then(|gpu| gpu.temp), " °C"),
-        );
-        metric_row(
-            ui,
-            "Power draw",
-            &reading(gpu.and_then(|gpu| gpu.power), " W"),
-        );
-        metric_row(
-            ui,
-            "Graphics clock",
-            &gpu.and_then(|gpu| gpu.clock_mhz)
-                .map(|value| format!("{value} MHz"))
-                .unwrap_or_else(|| "Unavailable".to_owned()),
-        );
-        metric_row(
-            ui,
-            "VRAM",
-            &gpu.and_then(|gpu| gpu.vram_used.zip(gpu.vram_total))
-                .map(|(used, total)| format!("{} / {}", bytes(used), bytes(total)))
-                .unwrap_or_else(|| "Unavailable".to_owned()),
-        );
-    });
+    card(
+        ui,
+        "Graphics load",
+        title,
+        colors().series_b,
+        CardIcon::Gpu,
+        |ui| {
+            main_metric(
+                ui,
+                &gpu.and_then(|gpu| gpu.usage)
+                    .map(|value| format!("{value:.0}%"))
+                    .unwrap_or_else(|| "—".to_owned()),
+                "GPU usage",
+            );
+            ui.label(
+                RichText::new(history_window_label())
+                    .size(10.0)
+                    .color(colors().muted),
+            );
+            sparkline(ui, history, colors().series_b);
+            metric_row(
+                ui,
+                "Temperature",
+                &reading(gpu.and_then(|gpu| gpu.temp), " °C"),
+            );
+            metric_row(
+                ui,
+                "Power draw",
+                &reading(gpu.and_then(|gpu| gpu.power), " W"),
+            );
+            metric_row(
+                ui,
+                "Graphics clock",
+                &gpu.and_then(|gpu| gpu.clock_mhz)
+                    .map(|value| format!("{value} MHz"))
+                    .unwrap_or_else(|| "Unavailable".to_owned()),
+            );
+            metric_row(
+                ui,
+                "VRAM",
+                &gpu.and_then(|gpu| gpu.vram_used.zip(gpu.vram_total))
+                    .map(|(used, total)| format!("{} / {}", bytes(used), bytes(total)))
+                    .unwrap_or_else(|| "Unavailable".to_owned()),
+            );
+        },
+    );
 }
 
 fn ram_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>) {
@@ -1740,6 +1887,7 @@ fn ram_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>)
         "Physical memory",
         "Used by Windows and applications",
         colors().series_a,
+        CardIcon::Memory,
         |ui| {
             main_metric(ui, &bytes(sample.ram_used), "used");
             ui.label(
@@ -1768,48 +1916,55 @@ fn drives_card(ui: &mut egui::Ui, sample: &Sample) {
     let subtitle = primary
         .map(|drive| format!("{}  {}", drive.mount, drive.name))
         .unwrap_or_else(|| "No mounted volume".to_owned());
-    card(ui, "Disk space", &subtitle, colors().storage, |ui| {
-        if let Some(drive) = primary {
-            let used = drive.total.saturating_sub(drive.free);
-            storage_ring(ui, percent(used, drive.total));
-            ui.vertical_centered(|ui| {
-                ui.label(
-                    RichText::new(format!("{} free", bytes(drive.free)))
-                        .size(20.0)
-                        .strong()
-                        .color(colors().text),
+    card(
+        ui,
+        "Disk space",
+        &subtitle,
+        colors().storage,
+        CardIcon::Disk,
+        |ui| {
+            if let Some(drive) = primary {
+                let used = drive.total.saturating_sub(drive.free);
+                storage_ring(ui, percent(used, drive.total));
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        RichText::new(format!("{} free", bytes(drive.free)))
+                            .size(20.0)
+                            .strong()
+                            .color(colors().text),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "{} used of {} total",
+                            bytes(used),
+                            bytes(drive.total)
+                        ))
+                        .size(10.5)
+                        .color(colors().muted),
+                    );
+                });
+                ui.add_space(10.0);
+                metric_row(
+                    ui,
+                    "Read",
+                    &drive
+                        .read_bps
+                        .map(rate)
+                        .unwrap_or_else(|| "Unavailable".to_owned()),
                 );
-                ui.label(
-                    RichText::new(format!(
-                        "{} used of {} total",
-                        bytes(used),
-                        bytes(drive.total)
-                    ))
-                    .size(10.5)
-                    .color(colors().muted),
+                metric_row(
+                    ui,
+                    "Write",
+                    &drive
+                        .write_bps
+                        .map(rate)
+                        .unwrap_or_else(|| "Unavailable".to_owned()),
                 );
-            });
-            ui.add_space(10.0);
-            metric_row(
-                ui,
-                "Read",
-                &drive
-                    .read_bps
-                    .map(rate)
-                    .unwrap_or_else(|| "Unavailable".to_owned()),
-            );
-            metric_row(
-                ui,
-                "Write",
-                &drive
-                    .write_bps
-                    .map(rate)
-                    .unwrap_or_else(|| "Unavailable".to_owned()),
-            );
-        } else {
-            ui.label(RichText::new("No drive readings available").color(colors().muted));
-        }
-    });
+            } else {
+                ui.label(RichText::new("No drive readings available").color(colors().muted));
+            }
+        },
+    );
 }
 
 fn sensor_card(ui: &mut egui::Ui, sample: &Sample, tab: &mut Tab) {
