@@ -4,6 +4,7 @@ mod cpu_clock;
 mod cpu_topology;
 mod disk_perf;
 mod lhm;
+mod network;
 mod readings;
 mod stats;
 
@@ -19,6 +20,7 @@ use cpu_clock::{CpuClock, spawn_cpu_clock};
 use cpu_topology::sensor_names;
 use disk_perf::{PerfRate, mount_key, spawn_disk_perf};
 use eframe::egui::{self, Color32, RichText};
+use network::{NetworkSample, NetworkSampler};
 use nvml_wrapper::{Nvml, enum_wrappers::device::TemperatureSensor};
 use readings::{Reading, collect_readings};
 use serde::Deserialize;
@@ -53,6 +55,7 @@ struct Sample {
     ram_available: u64,
     ram_total: u64,
     disks: Vec<Drive>,
+    network: NetworkSample,
     gpus: Vec<Gpu>,
     sensors: Vec<Sensor>,
     sensor_online: bool,
@@ -238,6 +241,7 @@ fn collect_sample(
     cpu_sources: &CpuSources,
     refresh_disks: bool,
     disk_perf: &Arc<RwLock<HashMap<String, PerfRate>>>,
+    network_sampler: &mut NetworkSampler,
 ) -> Sample {
     system.refresh_cpu_all();
     system.refresh_memory();
@@ -291,6 +295,7 @@ fn collect_sample(
         .read()
         .map(|guard| guard.clone())
         .unwrap_or_default();
+    let network = network_sampler.sample();
 
     let gpus = nvml
         .map(|nvml| {
@@ -366,6 +371,7 @@ fn collect_sample(
                 }
             })
             .collect(),
+        network,
         gpus,
         sensors,
         sensor_online,
@@ -386,6 +392,7 @@ fn spawn_sampler(output: Option<ChildStdout>) -> Receiver<Sample> {
             core_sensor_names: sensor_names(system.cpus().len()),
         };
         let disk_perf = spawn_disk_perf();
+        let mut network_sampler = NetworkSampler::new();
         let mut iteration = 0u64;
         loop {
             let started = Instant::now();
@@ -396,6 +403,7 @@ fn spawn_sampler(output: Option<ChildStdout>) -> Receiver<Sample> {
                 &cpu_sources,
                 iteration.is_multiple_of(5),
                 &disk_perf,
+                &mut network_sampler,
             );
             iteration = iteration.wrapping_add(1);
             if sender.send(sample).is_err() {
@@ -415,6 +423,8 @@ struct PerfmApp {
     cpu_history: VecDeque<Option<f32>>,
     gpu_history: VecDeque<Option<f32>>,
     ram_history: VecDeque<Option<f32>>,
+    download_history: VecDeque<Option<u64>>,
+    upload_history: VecDeque<Option<u64>>,
     readings: Vec<Reading>,
     stats: StatsBook,
     tab: Tab,
@@ -441,6 +451,8 @@ impl PerfmApp {
             cpu_history: VecDeque::with_capacity(90),
             gpu_history: VecDeque::with_capacity(90),
             ram_history: VecDeque::with_capacity(90),
+            download_history: VecDeque::with_capacity(90),
+            upload_history: VecDeque::with_capacity(90),
             readings: Vec::new(),
             stats: StatsBook::default(),
             tab: Tab::Overview,
@@ -465,6 +477,8 @@ impl PerfmApp {
                 &mut self.ram_history,
                 Some(percent(sample.ram_used, sample.ram_total)),
             );
+            push_rate_history(&mut self.download_history, sample.network.download_bps);
+            push_rate_history(&mut self.upload_history, sample.network.upload_bps);
             self.sample = sample;
             self.has_sample = true;
         }
@@ -519,6 +533,7 @@ impl eframe::App for PerfmApp {
                                                 &self.cpu_history,
                                                 &self.gpu_history,
                                                 &self.ram_history,
+                                                (&self.download_history, &self.upload_history),
                                                 &mut self.tab,
                                             );
                                         }
@@ -647,13 +662,20 @@ fn overview(
     cpu_history: &VecDeque<Option<f32>>,
     gpu_history: &VecDeque<Option<f32>>,
     ram_history: &VecDeque<Option<f32>>,
+    network_history: (&VecDeque<Option<u64>>, &VecDeque<Option<u64>>),
     tab: &mut Tab,
 ) {
-    if ui.available_width() >= 860.0 {
-        ui.columns(3, |columns| {
+    if ui.available_width() >= 900.0 {
+        ui.columns(4, |columns| {
             drives_card(&mut columns[0], sample);
             ram_card(&mut columns[1], sample, ram_history);
             gpu_card(&mut columns[2], sample, gpu_history);
+            network_card(
+                &mut columns[3],
+                sample,
+                network_history.0,
+                network_history.1,
+            );
         });
     } else {
         ui.columns(2, |columns| {
@@ -661,7 +683,15 @@ fn overview(
             ram_card(&mut columns[1], sample, ram_history);
         });
         ui.add_space(11.0);
-        gpu_card(ui, sample, gpu_history);
+        ui.columns(2, |columns| {
+            gpu_card(&mut columns[0], sample, gpu_history);
+            network_card(
+                &mut columns[1],
+                sample,
+                network_history.0,
+                network_history.1,
+            );
+        });
     }
     ui.add_space(22.0);
     ui.horizontal(|ui| {
@@ -728,6 +758,13 @@ fn push_history(history: &mut VecDeque<Option<f32>>, value: Option<f32>) {
     history.push_back(value.map(|value| value.clamp(0.0, 100.0)));
 }
 
+fn push_rate_history(history: &mut VecDeque<Option<u64>>, value: Option<u64>) {
+    if history.len() == 90 {
+        history.pop_front();
+    }
+    history.push_back(value);
+}
+
 fn percent(used: u64, total: u64) -> f32 {
     if total == 0 {
         0.0
@@ -755,6 +792,18 @@ fn rate(value: u64) -> String {
         format!("{:.1} KB/s", value as f64 / 1e3)
     } else {
         format!("{value} B/s")
+    }
+}
+
+fn network_bytes(value: u64) -> String {
+    if value >= 1_000_000_000 {
+        format!("{:.1} GB", value as f64 / 1e9)
+    } else if value >= 1_000_000 {
+        format!("{:.1} MB", value as f64 / 1e6)
+    } else if value >= 1_000 {
+        format!("{:.1} KB", value as f64 / 1e3)
+    } else {
+        format!("{value} B")
     }
 }
 
@@ -925,6 +974,115 @@ fn cpu_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>)
         });
         sparkline(ui, history, CYAN);
     });
+}
+
+fn network_card(
+    ui: &mut egui::Ui,
+    sample: &Sample,
+    download_history: &VecDeque<Option<u64>>,
+    upload_history: &VecDeque<Option<u64>>,
+) {
+    let connected = sample
+        .network
+        .adapters
+        .iter()
+        .filter(|adapter| adapter.connected)
+        .count();
+    card(
+        ui,
+        "Network traffic",
+        &format!("{connected} connected · all interfaces"),
+        CYAN,
+        |ui| {
+            main_metric(
+                ui,
+                &sample
+                    .network
+                    .download_bps
+                    .map(rate)
+                    .unwrap_or_else(|| "—".to_owned()),
+                "download",
+            );
+            ui.label(RichText::new("Last 90 seconds").size(10.0).color(MUTED));
+            network_chart(ui, download_history, upload_history);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("●").size(10.0).color(CYAN));
+                ui.label(RichText::new("Download").size(10.5).color(MUTED));
+                ui.add_space(6.0);
+                ui.label(RichText::new("●").size(10.0).color(PURPLE));
+                ui.label(RichText::new("Upload").size(10.5).color(MUTED));
+            });
+            metric_row(
+                ui,
+                "Upload",
+                &sample
+                    .network
+                    .upload_bps
+                    .map(rate)
+                    .unwrap_or_else(|| "Unavailable".to_owned()),
+            );
+            metric_row(ui, "Received", &network_bytes(sample.network.downloaded));
+            metric_row(ui, "Sent", &network_bytes(sample.network.uploaded));
+        },
+    );
+}
+
+fn network_chart(
+    ui: &mut egui::Ui,
+    download: &VecDeque<Option<u64>>,
+    upload: &VecDeque<Option<u64>>,
+) {
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 103.0),
+        egui::Sense::hover(),
+    );
+    let plot = rect.shrink2(egui::vec2(4.0, 8.0));
+    let painter = ui.painter_at(rect);
+    let peak = download
+        .iter()
+        .chain(upload.iter())
+        .flatten()
+        .copied()
+        .max()
+        .unwrap_or(0);
+    let scale = peak.max(1) as f32;
+    for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+        let y = plot.bottom() - fraction * plot.height();
+        painter.line_segment(
+            [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
+            egui::Stroke::new(1.0, Color32::from_rgb(38, 39, 44)),
+        );
+    }
+    painter.text(
+        plot.left_top() + egui::vec2(5.0, 3.0),
+        egui::Align2::LEFT_TOP,
+        rate(peak),
+        egui::FontId::proportional(9.0),
+        MUTED,
+    );
+    if peak == 0 && download.iter().all(Option::is_none) {
+        painter.text(
+            plot.center(),
+            egui::Align2::CENTER_CENTER,
+            "Waiting for network counters",
+            egui::FontId::proportional(11.0),
+            MUTED,
+        );
+    }
+    for (history, color) in [(download, CYAN), (upload, PURPLE)] {
+        let mut previous = None;
+        for (index, value) in history.iter().enumerate() {
+            let current = value.map(|value| {
+                let x = plot.right() - (history.len() - 1 - index) as f32 / 89.0 * plot.width();
+                let y = plot.bottom() - value as f32 / scale * plot.height();
+                egui::pos2(x, y)
+            });
+            if let (Some(start), Some(end)) = (previous, current) {
+                painter.line_segment([start, end], egui::Stroke::new(1.8, color));
+            }
+            previous = current;
+        }
+    }
 }
 
 fn core_chart(ui: &mut egui::Ui, sample: &Sample) {

@@ -13,19 +13,35 @@ pub struct Reading {
 impl Reading {
     pub fn formatted(&self) -> String {
         match self.value {
-            Some(value) if self.unit.is_empty() => format!("{:.*}", self.decimals, value),
-            Some(value) => format!("{:.*} {}", self.decimals, value, self.unit),
+            Some(value) => self.format_value(value),
             None => "Unavailable".to_owned(),
         }
     }
 
     pub fn format_value(&self, value: f64) -> String {
-        if self.unit.is_empty() {
+        if self.unit == "B/s" {
+            format_bytes(value, "/s")
+        } else if self.unit == "B" {
+            format_bytes(value, "")
+        } else if self.unit.is_empty() {
             format!("{:.*}", self.decimals, value)
         } else {
             format!("{:.*} {}", self.decimals, value, self.unit)
         }
     }
+}
+
+fn format_bytes(value: f64, suffix: &str) -> String {
+    let (scaled, unit) = if value.abs() >= 1e9 {
+        (value / 1e9, "GB")
+    } else if value.abs() >= 1e6 {
+        (value / 1e6, "MB")
+    } else if value.abs() >= 1e3 {
+        (value / 1e3, "KB")
+    } else {
+        return format!("{value:.0} B{suffix}");
+    };
+    format!("{scaled:.1} {unit}{suffix}")
 }
 
 fn add(
@@ -126,6 +142,65 @@ pub fn collect_readings(sample: &Sample) -> Vec<Reading> {
         "GB",
         2,
     );
+
+    let network = "Network".to_owned();
+    for (key, name, value, unit) in [
+        (
+            "network/download",
+            "Download rate",
+            sample.network.download_bps,
+            "B/s",
+        ),
+        (
+            "network/upload",
+            "Upload rate",
+            sample.network.upload_bps,
+            "B/s",
+        ),
+        (
+            "network/downloaded",
+            "Downloaded this session",
+            Some(sample.network.downloaded),
+            "B",
+        ),
+        (
+            "network/uploaded",
+            "Uploaded this session",
+            Some(sample.network.uploaded),
+            "B",
+        ),
+    ] {
+        add(
+            &mut readings,
+            key.to_owned(),
+            network.clone(),
+            name,
+            value.map(|value| value as f64),
+            unit,
+            0,
+        );
+    }
+    for adapter in &sample.network.adapters {
+        let group = format!("Network · {}", adapter.name);
+        for (direction, value) in [
+            ("download", adapter.download_bps),
+            ("upload", adapter.upload_bps),
+        ] {
+            add(
+                &mut readings,
+                format!("network/{}/{direction}", adapter.name),
+                group.clone(),
+                if direction == "download" {
+                    "Download rate"
+                } else {
+                    "Upload rate"
+                },
+                value.map(|value| value as f64),
+                "B/s",
+                0,
+            );
+        }
+    }
 
     for gpu in &sample.gpus {
         let group = format!("Graphics · {}", gpu.name);
@@ -295,7 +370,41 @@ pub fn collect_readings(sample: &Sample) -> Vec<Reading> {
 #[cfg(test)]
 mod tests {
     use super::collect_readings;
-    use crate::{Gpu, Sample, Sensor};
+    use crate::{
+        Gpu, Sample, Sensor,
+        network::{AdapterReading, NetworkSample},
+    };
+
+    #[test]
+    fn network_rates_and_session_totals_use_readable_units() {
+        let sample = Sample {
+            network: NetworkSample {
+                download_bps: Some(1_250_000),
+                upload_bps: Some(830),
+                downloaded: 2_400_000_000,
+                uploaded: 7_000,
+                adapters: vec![AdapterReading {
+                    name: "Wi-Fi".to_owned(),
+                    download_bps: Some(1_250_000),
+                    upload_bps: Some(830),
+                    connected: true,
+                }],
+            },
+            ..Default::default()
+        };
+        let readings = collect_readings(&sample);
+        let find = |key| {
+            readings
+                .iter()
+                .find(|reading| reading.key == key)
+                .unwrap()
+                .formatted()
+        };
+        assert_eq!(find("network/download"), "1.2 MB/s");
+        assert_eq!(find("network/upload"), "830 B/s");
+        assert_eq!(find("network/downloaded"), "2.4 GB");
+        assert_eq!(find("network/Wi-Fi/download"), "1.2 MB/s");
+    }
 
     #[test]
     fn zero_package_power_is_unavailable_in_sensor_table() {

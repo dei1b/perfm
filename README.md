@@ -1,12 +1,13 @@
 # Perfm
 
-A native Windows performance monitor written in Rust. It samples once per second and keeps the interface idle between updates. The dark overview has a drive capacity ring, live memory and graphics charts, quick readings, and a per-core processor chart. Hover a logical processor bar to see its usage, current clock, and physical-core temperature. If only package temperature is available, the hover card labels it as such. The navigation rail opens a searchable All sensors table with current, minimum, maximum, and average readings for the current Perfm session.
+A native Windows performance monitor written in Rust. It samples once per second and keeps the interface idle between updates. The dark overview has a drive capacity ring, live memory and graphics charts, quick readings, a per-core processor chart, and a network traffic chart. Hover a logical processor bar to see its usage, current clock, and physical-core temperature. If only package temperature is available, the hover card labels it as such. The navigation rail opens a searchable All sensors table with current, minimum, maximum, and average readings for the current Perfm session.
 
 ## Readings
 
 - CPU: total and per-logical-processor usage, current Windows processor frequency, temperature and package power when a sensor provider exposes them.
 - RAM: used, available, and total physical memory.
 - Drives: free and total space, read and write rates, and activity for mounted volumes, plus any temperature sensors exposed by LibreHardwareMonitor.
+- Network: live download and upload rates across all interfaces, a 90-second traffic history, session transfer totals, and per-adapter rates in All sensors. Rates use the actual time between samples.
 - NVIDIA GPU: utilization, memory, temperature, power draw, and graphics clock through NVML when the driver supports each reading.
 - Other hardware sensors: temperatures, powers, fans, voltages, and additional memory and drive readings through the bundled LibreHardwareMonitorLib bridge.
 
