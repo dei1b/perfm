@@ -1,37 +1,178 @@
 # Perfm
 
-A native Windows performance monitor written in Rust. It samples once per second and keeps the interface idle between updates. The dark overview has four telemetry cards for drive, memory, graphics, and network activity. The processor panel pairs a 90-second total usage chart with per-logical-processor bars. Hover a logical processor bar to see its usage, current clock, and physical-core temperature. If only package temperature is available, the hover card labels it as such. The navigation rail opens a searchable All sensors table with current, minimum, maximum, and average readings for the current Perfm session.
+Perfm is a lightweight, native Windows performance monitor written in Rust. It
+provides a focused dashboard for CPU, memory, storage, network, and graphics
+telemetry, with a searchable sensor table for detailed readings.
 
+<<<<<<< HEAD
 The Settings icon in the navigation rail opens 13 color themes: Perfm Original and the 12 palettes from the color-palettes collection. Selecting a theme updates the interface immediately. Perfm saves the choice in `%LOCALAPPDATA%\Perfm\settings.json` and restores it on the next launch. Each palette keeps the dashboard dark and uses its supplied neutral and accent shades.
 
 ## Readings
+=======
+Perfm samples the dashboard once per second, keeps the interface responsive
+while slower hardware queries run in the background, and does not require an
+account, telemetry service, or background daemon.
+>>>>>>> 33e7ff46f2ad5a2df827ec6009ade49f1b56380a
 
-- CPU: total and per-logical-processor usage, current Windows processor frequency, temperature and package power when a sensor provider exposes them.
-- RAM: used, available, and total physical memory.
-- Drives: free and total space, read and write rates, and activity for mounted volumes, plus any temperature sensors exposed by LibreHardwareMonitor.
-- Network: live download and upload rates across all interfaces, a 90-second traffic history, session transfer totals, and per-adapter rates in All sensors. Rates use the actual time between samples.
-- NVIDIA GPU: utilization, memory, temperature, power draw, and graphics clock through NVML when the driver supports each reading.
-- Other hardware sensors: temperatures, powers, fans, voltages, and additional memory and drive readings through the bundled LibreHardwareMonitorLib bridge.
+## Features
 
-The interface shows `Unavailable` for a reading that Windows, the driver, or the optional sensor provider does not expose. A missing reading is never represented as zero. Drive performance counters and optional hardware sensors are queried on separate threads so they cannot stall the main dashboard. Cached disk rates expire if their source stops updating. The status badge changes to `STALE` if dashboard sampling stops.
+- **CPU:** total usage, per-logical-processor usage, current processor
+  frequency, package temperature, and package power when available.
+- **Memory:** used, available, and installed physical memory.
+- **Storage:** capacity, read/write throughput, activity, and available drive
+  temperature sensors for mounted volumes.
+- **Network:** aggregate and per-adapter download/upload rates, a 90-second
+  traffic history, and session transfer totals.
+- **NVIDIA graphics:** utilization, VRAM usage, temperature, power draw, and
+  graphics clock through NVML when supported by the installed driver.
+- **Additional sensors:** temperatures, power, fans, voltages, and other
+  hardware readings through the bundled LibreHardwareMonitor bridge.
+- **Sensor history:** current, minimum, maximum, and average values in the
+  searchable **All sensors** view.
+- **Explicit unavailable data:** readings that are not exposed by Windows,
+  firmware, drivers, or an optional provider are shown as `Unavailable`, not
+  as a misleading zero.
 
-## Build and run
+## Requirements
 
-Install the current stable Rust toolchain and Visual Studio C++ Build Tools, open the **x64 Native Tools Command Prompt for VS 2022**, then run:
+Perfm is currently supported on **64-bit Windows**.
+
+### Running the application
+
+- A packaged Perfm build.
+- The .NET 10 runtime for the framework-dependent sensor bridge included in
+  the package.
+- An NVIDIA driver is required only for NVIDIA-specific telemetry.
+
+### Building from source
+
+- The current stable Rust toolchain.
+- Visual Studio 2022 C++ Build Tools, including the Windows development tools.
+- The .NET 10 SDK if you want to build the sensor bridge and create a complete
+  distributable package.
+
+## Quick start
+
+Download or build a package, then launch:
+
+```text
+dist\Perfm-Integrated\Perfm.exe
+```
+
+The packaged executable starts the sensor bridge from the adjacent
+`SensorBridge` directory when it is present. Core Windows, storage, network,
+and NVML readings can still work when optional hardware sensors are
+unavailable.
+
+To request administrator access for sensors that require it, run:
+
+```text
+dist\Perfm-Integrated\Run Perfm with CPU sensors.cmd
+```
+
+Windows displays a UAC prompt. Elevated access is optional; it may expose
+additional CPU temperature, clock, power, or motherboard readings on systems
+where the hardware provider requires it.
+
+## Build from source
+
+Open an **x64 Native Tools Command Prompt for VS 2022**, then run:
+
+```powershell
+cargo build --release
+```
+
+The Rust executable is written to:
+
+```text
+target\release\perfm.exe
+```
+
+You can also run the application directly during development:
 
 ```powershell
 cargo run --release
 ```
 
-The executable will be at `target\release\perfm.exe`. To make the complete package, install the .NET 10 SDK and run `scripts\package.ps1`. The package script builds the small .NET bridge and places everything in `dist\Perfm-Integrated`. Launch `dist\Perfm-Integrated\Perfm.exe`; the bundled bridge starts and stops with Perfm. This framework-dependent package requires the .NET 10 runtime on the laptop.
+### Create a distributable package
 
-## Bundled CPU and drive sensors
+Build the Rust executable first, install the .NET 10 SDK, and run:
 
-The package includes [LibreHardwareMonitorLib 0.9.6](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) through NuGet. The bridge sends readings to Perfm through a local process pipe. It does not start the LibreHardwareMonitor window or web server. License and third-party notices are in `dist\Perfm-Integrated\SensorBridge`.
+```powershell
+.\scripts\package.ps1
+```
 
-Sensor availability depends on the laptop firmware, drivers, and access level. On this laptop, the unelevated bridge reports many load, memory, voltage, battery, and GPU readings. It cannot open the running PawnIO driver (`Access denied`, Windows error 5), so Intel CPU package temperature and core clocks are unavailable and package power reports zero. Double-click `Run Perfm with CPU sensors.cmd` in the package to request administrator access for Perfm and its bundled bridge. Windows will show a UAC prompt. This is optional; normal launch still works for sensors that do not need that access. Perfm displays a missing package reading as `Unavailable` instead of presenting zero watts as a real measurement. The CPU clock tile reads the current Windows `Processor Frequency` counter once per second; if that counter is unavailable, it displays the average of valid LibreHardwareMonitor core clocks. The NVIDIA GPU readings use NVIDIA's driver API directly.
+The script builds the .NET sensor bridge and creates:
 
+```text
+dist\Perfm-Integrated\
+├── Perfm.exe
+├── Run Perfm with CPU sensors.cmd
+└── SensorBridge\
+    ├── Perfm.SensorBridge.exe
+    └── license and third-party notices
+```
 
-## HWiNFO reference
+The package is framework-dependent, so the .NET 10 runtime must be installed
+on the target machine. To choose another output directory:
 
-This design was informed by an inspection of the installed HWiNFO sensor window, especially its hardware grouping and current/minimum/maximum/average view. Perfm is an independent implementation and does not require HWiNFO to run. See [the design notes](docs/design.md) for what was observed and what remains unknown.
+```powershell
+.\scripts\package.ps1 -OutputDirectory C:\Releases\Perfm
+```
+
+## How it works
+
+Perfm combines several data sources:
+
+| Area | Source |
+| --- | --- |
+| CPU usage and system information | Windows and `sysinfo` |
+| Processor frequency | Windows `Processor Frequency` performance counter |
+| Drive capacity | `sysinfo` |
+| Drive throughput and activity | Windows logical disk performance counters |
+| Network rates and totals | Windows interface counters |
+| NVIDIA telemetry | NVIDIA Management Library (NVML) |
+| Optional temperatures, power, fans, and voltages | LibreHardwareMonitorLib 0.9.6 through the bundled .NET bridge |
+| UI and rendering | Rust with `eframe`/`egui` |
+
+The bridge emits sensor snapshots over a local process pipe. It does not start
+the LibreHardwareMonitor window or web server. Disk performance collection and
+optional hardware sensor collection run independently from the dashboard so a
+slow or unavailable provider does not block the UI. Cached disk rates expire
+when their source stops updating, and the status indicator changes to `STALE`
+if dashboard sampling stops.
+
+## Sensor availability
+
+Sensor availability varies by Windows version, firmware, driver, hardware, and
+whether Perfm is running elevated. In particular:
+
+- Some CPU package and per-core sensors require administrator access or a
+  provider driver.
+- NVIDIA readings require a compatible NVIDIA driver and may be unavailable on
+  unsupported hardware.
+- Drive temperature and SMART readings depend on what the device and provider
+  expose.
+- The processor clock tile prefers the Windows processor-frequency counter and
+  falls back to an average of valid hardware-provider core clocks.
+
+Perfm does not treat an unavailable sensor as a zero measurement. This keeps
+missing data distinguishable from a real zero value.
+
+## Project layout
+
+```text
+src/       Rust application and collectors
+bridge/    .NET sensor bridge using LibreHardwareMonitorLib
+scripts/   Packaging and elevated-launch helpers
+licenses/  Third-party license and notice files
+docs/      Design documentation
+```
+
+## License
+
+Perfm is licensed under the MIT License; see [LICENSE](LICENSE).
+
+The packaged sensor bridge includes LibreHardwareMonitorLib under its own
+license. See the files in [`licenses/`](licenses/) for the MPL-2.0 license and
+third-party notices.
