@@ -7,6 +7,7 @@ mod lhm;
 mod network;
 mod readings;
 mod stats;
+mod theme;
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
@@ -28,17 +29,7 @@ use stats::StatsBook;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use sysinfo::{Disks, System};
-
-const BG: Color32 = Color32::from_rgb(8, 9, 11);
-const RAIL: Color32 = Color32::from_rgb(12, 13, 16);
-const PANEL: Color32 = Color32::from_rgb(17, 18, 21);
-const BORDER: Color32 = Color32::from_rgb(49, 51, 57);
-const TEXT: Color32 = Color32::from_rgb(242, 243, 245);
-const MUTED: Color32 = Color32::from_rgb(150, 153, 160);
-const CYAN: Color32 = Color32::from_rgb(105, 198, 224);
-const PURPLE: Color32 = Color32::from_rgb(170, 143, 247);
-const GREEN: Color32 = Color32::from_rgb(66, 208, 158);
-const AMBER: Color32 = Color32::from_rgb(238, 188, 118);
+use theme::active as colors;
 
 #[derive(Clone, Default)]
 struct Sample {
@@ -429,16 +420,21 @@ struct PerfmApp {
     stats: StatsBook,
     tab: Tab,
     search: String,
+    theme_index: usize,
+    settings_error: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Overview,
     Sensors,
+    Settings,
 }
 
 impl PerfmApp {
     fn new() -> Self {
+        let theme_index = theme::load();
+        theme::select(theme_index);
         let (helper, output) = match start_sensor_bridge() {
             Some((helper, output)) => (Some(helper), Some(output)),
             None => (None, None),
@@ -457,6 +453,8 @@ impl PerfmApp {
             stats: StatsBook::default(),
             tab: Tab::Overview,
             search: String::new(),
+            theme_index,
+            settings_error: None,
         }
     }
 
@@ -499,11 +497,20 @@ impl eframe::App for PerfmApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = BG;
-        visuals.window_fill = BG;
-        visuals.selection.bg_fill = PURPLE.gamma_multiply(0.3);
+        visuals.panel_fill = colors().bg;
+        visuals.window_fill = colors().bg;
+        visuals.override_text_color = Some(colors().text);
+        visuals.faint_bg_color = colors().panel;
+        visuals.extreme_bg_color = colors().bg;
+        visuals.code_bg_color = colors().panel;
+        visuals.hyperlink_color = colors().nav;
+        visuals.widgets.inactive.bg_fill = colors().panel;
+        visuals.widgets.hovered.bg_fill = colors().border;
+        visuals.widgets.active.bg_fill = colors().nav;
+        visuals.selection.bg_fill = colors().nav.gamma_multiply(0.3);
+        visuals.selection.stroke.color = colors().text;
         ui.ctx().set_visuals(visuals);
-        egui::Frame::new().fill(BG).show(ui, |ui| {
+        egui::Frame::new().fill(colors().bg).show(ui, |ui| {
             let viewport = ui.available_size();
             ui.horizontal_top(|ui| {
                 sidebar(ui, &mut self.tab);
@@ -512,14 +519,21 @@ impl eframe::App for PerfmApp {
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         egui::Frame::new()
-                            .fill(BG)
+                            .fill(colors().bg)
                             .inner_margin(egui::Margin::symmetric(22, 20))
                             .show(ui, |ui| {
-                                topbar(ui, &self.sample, self.has_sample, self.readings.len());
+                                topbar(
+                                    ui,
+                                    &self.sample,
+                                    self.has_sample,
+                                    self.readings.len(),
+                                    self.tab,
+                                );
                                 ui.add_space(22.0);
-                                if !self.has_sample {
+                                if !self.has_sample && self.tab != Tab::Settings {
                                     ui.label(
-                                        RichText::new("Collecting the first reading…").color(MUTED),
+                                        RichText::new("Collecting the first reading…")
+                                            .color(colors().muted),
                                     );
                                     return;
                                 }
@@ -545,6 +559,11 @@ impl eframe::App for PerfmApp {
                                                 &mut self.search,
                                             );
                                         }
+                                        Tab::Settings => settings_view(
+                                            ui,
+                                            &mut self.theme_index,
+                                            &mut self.settings_error,
+                                        ),
                                     });
                             });
                     },
@@ -556,51 +575,69 @@ impl eframe::App for PerfmApp {
 
 fn sidebar(ui: &mut egui::Ui, tab: &mut Tab) {
     egui::Frame::new()
-        .fill(RAIL)
-        .stroke(egui::Stroke::new(1.0, BORDER))
+        .fill(colors().rail)
+        .stroke(egui::Stroke::new(1.0, colors().border))
         .inner_margin(egui::Margin::symmetric(8, 17))
         .show(ui, |ui| {
             ui.set_width(48.0);
             ui.set_min_height(ui.available_height());
             ui.vertical_centered(|ui| {
-                ui.label(RichText::new("P").size(24.0).strong().color(TEXT));
+                ui.label(RichText::new("P").size(24.0).strong().color(colors().text));
                 ui.add_space(24.0);
-                for (target, title) in [(Tab::Overview, "Overview"), (Tab::Sensors, "All sensors")]
-                {
+                for (target, title) in [
+                    (Tab::Overview, "Overview"),
+                    (Tab::Sensors, "All sensors"),
+                    (Tab::Settings, "Settings"),
+                ] {
                     let active = *tab == target;
                     let response = ui
                         .add_sized(
                             [42.0, 42.0],
                             egui::Button::new("")
                                 .fill(if active {
-                                    Color32::from_rgb(39, 32, 55)
+                                    colors().nav.gamma_multiply(0.25)
                                 } else {
-                                    RAIL
+                                    colors().rail
                                 })
                                 .stroke(egui::Stroke::NONE)
                                 .corner_radius(7),
                         )
                         .on_hover_text(title);
                     let center = response.rect.center();
-                    let color = if active { PURPLE } else { MUTED };
+                    let color = if active { colors().nav } else { colors().muted };
                     let painter = ui.painter();
-                    if target == Tab::Overview {
-                        let points = [(-12.0, 5.0), (-5.0, -2.0), (1.0, 2.0), (10.0, -8.0)];
-                        for pair in points.windows(2) {
-                            painter.line_segment(
-                                [
-                                    center + egui::vec2(pair[0].0, pair[0].1),
-                                    center + egui::vec2(pair[1].0, pair[1].1),
-                                ],
-                                egui::Stroke::new(1.8, color),
-                            );
+                    match target {
+                        Tab::Overview => {
+                            let points = [(-12.0, 5.0), (-5.0, -2.0), (1.0, 2.0), (10.0, -8.0)];
+                            for pair in points.windows(2) {
+                                painter.line_segment(
+                                    [
+                                        center + egui::vec2(pair[0].0, pair[0].1),
+                                        center + egui::vec2(pair[1].0, pair[1].1),
+                                    ],
+                                    egui::Stroke::new(1.8, color),
+                                );
+                            }
                         }
-                    } else {
-                        for y in [-7.0, 0.0, 7.0] {
-                            painter.line_segment(
-                                [center + egui::vec2(-10.0, y), center + egui::vec2(10.0, y)],
-                                egui::Stroke::new(1.8, color),
-                            );
+                        Tab::Sensors => {
+                            for y in [-7.0, 0.0, 7.0] {
+                                painter.line_segment(
+                                    [center + egui::vec2(-10.0, y), center + egui::vec2(10.0, y)],
+                                    egui::Stroke::new(1.8, color),
+                                );
+                            }
+                        }
+                        Tab::Settings => {
+                            painter.circle_stroke(center, 8.0, egui::Stroke::new(1.7, color));
+                            painter.circle_stroke(center, 2.6, egui::Stroke::new(1.7, color));
+                            for angle in 0..8 {
+                                let radians = angle as f32 * std::f32::consts::TAU / 8.0;
+                                let direction = egui::vec2(radians.cos(), radians.sin());
+                                painter.line_segment(
+                                    [center + direction * 10.0, center + direction * 13.0],
+                                    egui::Stroke::new(1.7, color),
+                                );
+                            }
                         }
                     }
                     if response.clicked() {
@@ -612,30 +649,39 @@ fn sidebar(ui: &mut egui::Ui, tab: &mut Tab) {
         });
 }
 
-fn topbar(ui: &mut egui::Ui, sample: &Sample, has_sample: bool, count: usize) {
+fn topbar(ui: &mut egui::Ui, sample: &Sample, has_sample: bool, count: usize, tab: Tab) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
-            ui.label(RichText::new("Monitoring").size(25.0).strong().color(TEXT));
+            ui.label(
+                RichText::new(if tab == Tab::Settings {
+                    "Settings"
+                } else {
+                    "Monitoring"
+                })
+                .size(25.0)
+                .strong()
+                .color(colors().text),
+            );
             ui.label(
                 RichText::new("Perfm  /  This device")
                     .size(11.0)
-                    .color(MUTED),
+                    .color(colors().muted),
             );
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let (status, color) = if !has_sample {
-                ("Starting", MUTED)
+                ("Starting", colors().muted)
             } else if sample
                 .sampled_at
                 .is_some_and(|time| time.elapsed() <= Duration::from_secs(3))
             {
-                ("Live", GREEN)
+                ("Live", colors().success)
             } else {
-                ("Stale", AMBER)
+                ("Stale", colors().warning)
             };
             egui::Frame::new()
-                .fill(PANEL)
-                .stroke(egui::Stroke::new(1.0, BORDER))
+                .fill(colors().panel)
+                .stroke(egui::Stroke::new(1.0, colors().border))
                 .corner_radius(6)
                 .inner_margin(egui::Margin::symmetric(11, 7))
                 .show(ui, |ui| {
@@ -650,10 +696,151 @@ fn topbar(ui: &mut egui::Ui, sample: &Sample, has_sample: bool, count: usize) {
             ui.label(
                 RichText::new(format!("{count} readings  ·  1 sec refresh"))
                     .size(11.0)
-                    .color(MUTED),
+                    .color(colors().muted),
             );
         });
     });
+}
+
+fn settings_view(ui: &mut egui::Ui, selected: &mut usize, error: &mut Option<String>) {
+    ui.label(
+        RichText::new("Appearance")
+            .size(18.0)
+            .strong()
+            .color(colors().text),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new("Choose a palette for the dashboard. Changes apply immediately and are saved on this device.")
+            .size(11.0)
+            .color(colors().muted),
+    );
+    ui.add_space(18.0);
+    egui::Frame::new()
+        .fill(colors().panel)
+        .stroke(egui::Stroke::new(1.0, colors().border))
+        .corner_radius(7)
+        .inner_margin(egui::Margin::same(16))
+        .show(ui, |ui| {
+            ui.set_min_width((ui.available_width() - 32.0).max(160.0));
+            ui.label(
+                RichText::new("Current theme")
+                    .size(10.5)
+                    .color(colors().muted),
+            );
+            ui.label(
+                RichText::new(theme::THEMES[*selected].name)
+                    .size(20.0)
+                    .strong()
+                    .color(colors().text),
+            );
+            ui.label(
+                RichText::new(theme::THEMES[*selected].description)
+                    .size(11.0)
+                    .color(colors().muted),
+            );
+        });
+    if let Some(message) = error {
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new(format!("Could not save the theme: {message}"))
+                .size(11.0)
+                .color(Color32::from_rgb(230, 106, 106)),
+        );
+    }
+    ui.add_space(20.0);
+    ui.label(
+        RichText::new("Available themes")
+            .size(13.0)
+            .strong()
+            .color(colors().text),
+    );
+    ui.add_space(10.0);
+    let columns_count = if ui.available_width() >= 820.0 { 3 } else { 2 };
+    let mut new_selection = None;
+    ui.columns(columns_count, |columns| {
+        for (index, palette) in theme::THEMES.iter().enumerate() {
+            let column = &mut columns[index % columns_count];
+            if theme_choice(column, palette, index == *selected) {
+                new_selection = Some(index);
+            }
+            column.add_space(10.0);
+        }
+    });
+    if let Some(index) = new_selection {
+        *selected = index;
+        theme::select(index);
+        *error = theme::save(index).err().map(|error| error.to_string());
+        ui.ctx().request_repaint();
+    }
+}
+
+fn theme_choice(ui: &mut egui::Ui, palette: &theme::Theme, selected: bool) -> bool {
+    let response = ui
+        .add_sized(
+            [ui.available_width(), 82.0],
+            egui::Button::new(
+                RichText::new(palette.name)
+                    .size(12.0)
+                    .strong()
+                    .color(palette.text),
+            )
+            .fill(palette.panel)
+            .stroke(egui::Stroke::new(
+                if selected { 2.0 } else { 1.0 },
+                if selected {
+                    colors().nav
+                } else {
+                    palette.border
+                },
+            ))
+            .corner_radius(7),
+        )
+        .on_hover_text(palette.description);
+    let rect = response.rect;
+    let swatches = [
+        palette.bg,
+        palette.panel,
+        palette.series_a,
+        palette.series_b,
+        palette.storage,
+    ];
+    let swatch_width = 24.0;
+    let gap = 5.0;
+    let total = swatches.len() as f32 * swatch_width + (swatches.len() - 1) as f32 * gap;
+    let start = rect.center().x - total / 2.0;
+    for (index, swatch) in swatches.into_iter().enumerate() {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_size(
+                egui::pos2(
+                    start + index as f32 * (swatch_width + gap),
+                    rect.bottom() - 23.0,
+                ),
+                egui::vec2(swatch_width, 11.0),
+            ),
+            2.0,
+            swatch,
+        );
+    }
+    if selected {
+        let center = rect.right_top() + egui::vec2(-17.0, 17.0);
+        ui.painter().circle_filled(center, 9.0, colors().nav);
+        ui.painter().line_segment(
+            [
+                center + egui::vec2(-4.0, 0.0),
+                center + egui::vec2(-1.0, 3.0),
+            ],
+            egui::Stroke::new(2.0, palette.bg),
+        );
+        ui.painter().line_segment(
+            [
+                center + egui::vec2(-1.0, 3.0),
+                center + egui::vec2(5.0, -4.0),
+            ],
+            egui::Stroke::new(2.0, palette.bg),
+        );
+    }
+    response.clicked()
 }
 
 fn overview(
@@ -699,10 +886,14 @@ fn overview(
             RichText::new("System performance")
                 .size(16.0)
                 .strong()
-                .color(TEXT),
+                .color(colors().text),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new("Current readings").size(11.0).color(MUTED));
+            ui.label(
+                RichText::new("Current readings")
+                    .size(11.0)
+                    .color(colors().muted),
+            );
         });
     });
     ui.add_space(10.0);
@@ -712,7 +903,7 @@ fn overview(
             "CPU usage",
             &format!("{:.0}%", sample.cpu_usage),
             "Across all logical processors",
-            AMBER,
+            colors().cpu,
         );
         stat_tile(
             &mut columns[1],
@@ -727,21 +918,21 @@ fn overview(
             } else {
                 "Current CPU frequency"
             },
-            CYAN,
+            colors().series_a,
         );
         stat_tile(
             &mut columns[2],
             "CPU temperature",
             &reading(sample.cpu_temp, " °C"),
             "Package sensor",
-            PURPLE,
+            colors().series_b,
         );
         stat_tile(
             &mut columns[3],
             "GPU power",
             &reading(sample.gpus.first().and_then(|gpu| gpu.power), " W"),
             "NVIDIA reported draw",
-            GREEN,
+            colors().storage,
         );
     });
     ui.add_space(18.0);
@@ -821,8 +1012,8 @@ fn card(
     body: impl FnOnce(&mut egui::Ui),
 ) {
     egui::Frame::new()
-        .fill(PANEL)
-        .stroke(egui::Stroke::new(1.0, BORDER))
+        .fill(colors().panel)
+        .stroke(egui::Stroke::new(1.0, colors().border))
         .corner_radius(egui::CornerRadius::same(7))
         .inner_margin(egui::Margin::same(15))
         .show(ui, |ui| {
@@ -832,9 +1023,14 @@ fn card(
                 let (mark, _) =
                     ui.allocate_exact_size(egui::vec2(10.0, 12.0), egui::Sense::hover());
                 ui.painter().circle_filled(mark.center(), 3.0, accent);
-                ui.label(RichText::new(title).size(13.0).strong().color(TEXT));
+                ui.label(
+                    RichText::new(title)
+                        .size(13.0)
+                        .strong()
+                        .color(colors().text),
+                );
             });
-            ui.label(RichText::new(subtitle).size(10.5).color(MUTED));
+            ui.label(RichText::new(subtitle).size(10.5).color(colors().muted));
             ui.add_space(9.0);
             ui.separator();
             ui.add_space(7.0);
@@ -844,33 +1040,43 @@ fn card(
 
 fn main_metric(ui: &mut egui::Ui, value: &str, caption: &str) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new(value).size(29.0).strong().color(TEXT));
+        ui.label(
+            RichText::new(value)
+                .size(29.0)
+                .strong()
+                .color(colors().text),
+        );
         ui.add_space(5.0);
-        ui.label(RichText::new(caption).size(10.5).color(MUTED));
+        ui.label(RichText::new(caption).size(10.5).color(colors().muted));
     });
 }
 
 fn stat_tile(ui: &mut egui::Ui, title: &str, value: &str, description: &str, accent: Color32) {
     egui::Frame::new()
-        .fill(PANEL)
-        .stroke(egui::Stroke::new(1.0, BORDER))
+        .fill(colors().panel)
+        .stroke(egui::Stroke::new(1.0, colors().border))
         .corner_radius(6)
         .inner_margin(egui::Margin::same(13))
         .show(ui, |ui| {
             ui.set_min_width((ui.available_width() - 26.0).max(115.0));
             ui.set_min_height(92.0);
-            ui.label(RichText::new(title).size(11.0).color(MUTED));
+            ui.label(RichText::new(title).size(11.0).color(colors().muted));
             ui.add_space(7.0);
             ui.label(RichText::new(value).size(21.0).strong().color(accent));
-            ui.label(RichText::new(description).size(10.0).color(MUTED));
+            ui.label(RichText::new(description).size(10.0).color(colors().muted));
         });
 }
 
 fn metric_row(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new(label).size(10.5).color(MUTED));
+        ui.label(RichText::new(label).size(10.5).color(colors().muted));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(value).size(11.0).strong().color(TEXT));
+            ui.label(
+                RichText::new(value)
+                    .size(11.0)
+                    .strong()
+                    .color(colors().text),
+            );
         });
     });
 }
@@ -885,7 +1091,7 @@ fn sparkline(ui: &mut egui::Ui, history: &VecDeque<Option<f32>>, color: Color32)
         let y = rect.bottom() - fraction * rect.height();
         painter.line_segment(
             [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-            egui::Stroke::new(1.0, Color32::from_rgb(38, 39, 44)),
+            egui::Stroke::new(1.0, colors().border.gamma_multiply(0.75)),
         );
     }
     let mut previous = None;
@@ -920,11 +1126,7 @@ fn storage_ring(ui: &mut egui::Ui, used_percent: f32) {
     let painter = ui.painter_at(rect);
     let center = rect.center();
     let radius = 55.0;
-    painter.circle_stroke(
-        center,
-        radius,
-        egui::Stroke::new(17.0, Color32::from_rgb(47, 49, 50)),
-    );
+    painter.circle_stroke(center, radius, egui::Stroke::new(17.0, colors().border));
     let segments = 100;
     let count = (used_percent.clamp(0.0, 100.0) / 100.0 * segments as f32).round() as usize;
     for index in 0..count {
@@ -933,28 +1135,31 @@ fn storage_ring(ui: &mut egui::Ui, used_percent: f32) {
         let end = -std::f32::consts::FRAC_PI_2
             + (index + 1) as f32 / segments as f32 * std::f32::consts::TAU;
         let point = |angle: f32| center + egui::vec2(radius * angle.cos(), radius * angle.sin());
-        painter.line_segment([point(start), point(end)], egui::Stroke::new(17.0, GREEN));
+        painter.line_segment(
+            [point(start), point(end)],
+            egui::Stroke::new(17.0, colors().storage),
+        );
     }
     painter.text(
         center + egui::vec2(0.0, -12.0),
         egui::Align2::CENTER_CENTER,
         "Used",
         egui::FontId::proportional(10.0),
-        MUTED,
+        colors().muted,
     );
     painter.text(
         center + egui::vec2(0.0, 12.0),
         egui::Align2::CENTER_CENTER,
         format!("{used_percent:.0}%"),
         egui::FontId::proportional(24.0),
-        TEXT,
+        colors().text,
     );
 }
 
 fn cpu_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>) {
     egui::Frame::new()
-        .fill(PANEL)
-        .stroke(egui::Stroke::new(1.0, BORDER))
+        .fill(colors().panel)
+        .stroke(egui::Stroke::new(1.0, colors().border))
         .corner_radius(egui::CornerRadius::same(7))
         .inner_margin(egui::Margin::same(14))
         .show(ui, |ui| {
@@ -987,7 +1192,7 @@ fn cpu_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>)
                             egui::pos2(x, right.response.rect.top() - 14.0),
                             egui::pos2(x, right.response.rect.bottom() + 14.0),
                         ],
-                        egui::Stroke::new(1.0, BORDER.gamma_multiply(0.65)),
+                        egui::Stroke::new(1.0, colors().border.gamma_multiply(0.65)),
                     );
                 });
             }
@@ -997,23 +1202,28 @@ fn cpu_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>)
 fn cpu_history_panel(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>) {
     ui.horizontal(|ui| {
         let (mark, _) = ui.allocate_exact_size(egui::vec2(12.0, 13.0), egui::Sense::hover());
-        ui.painter().circle_filled(mark.center(), 4.5, PURPLE);
+        ui.painter()
+            .circle_filled(mark.center(), 4.5, colors().series_b);
         ui.label(
             RichText::new("Processor activity")
                 .size(13.0)
                 .strong()
-                .color(TEXT),
+                .color(colors().text),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 RichText::new(format!("{:.0}% now", sample.cpu_usage))
                     .size(11.0)
                     .strong()
-                    .color(TEXT),
+                    .color(colors().text),
             );
         });
     });
-    ui.label(RichText::new(&sample.cpu_name).size(10.5).color(MUTED));
+    ui.label(
+        RichText::new(&sample.cpu_name)
+            .size(10.5)
+            .color(colors().muted),
+    );
     cpu_history_chart(ui, history);
 }
 
@@ -1022,12 +1232,12 @@ fn logical_processor_panel(ui: &mut egui::Ui, sample: &Sample) {
         RichText::new("Per logical processor")
             .size(12.0)
             .strong()
-            .color(TEXT),
+            .color(colors().text),
     );
     ui.label(
         RichText::new(format!("{} logical processors", sample.cores.len()))
             .size(10.5)
-            .color(MUTED),
+            .color(colors().muted),
     );
     core_chart(ui, sample);
 }
@@ -1046,21 +1256,21 @@ fn cpu_history_chart(ui: &mut egui::Ui, history: &VecDeque<Option<f32>>) {
         let y = plot.bottom() - level as f32 / 100.0 * plot.height();
         painter.line_segment(
             [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
-            egui::Stroke::new(1.0, Color32::from_rgb(39, 41, 46)),
+            egui::Stroke::new(1.0, colors().border.gamma_multiply(0.75)),
         );
         painter.text(
             egui::pos2(plot.left() - 6.0, y),
             egui::Align2::RIGHT_CENTER,
             level.to_string(),
             egui::FontId::proportional(9.0),
-            MUTED,
+            colors().muted,
         );
     }
     for tick in 0..=9 {
         let x = plot.left() + tick as f32 / 9.0 * plot.width();
         painter.line_segment(
             [egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())],
-            egui::Stroke::new(1.0, Color32::from_rgb(39, 41, 46)),
+            egui::Stroke::new(1.0, colors().border.gamma_multiply(0.75)),
         );
         let label = if tick == 9 {
             "Now".to_owned()
@@ -1078,7 +1288,7 @@ fn cpu_history_chart(ui: &mut egui::Ui, history: &VecDeque<Option<f32>>) {
             },
             label,
             egui::FontId::proportional(9.0),
-            MUTED,
+            colors().muted,
         );
     }
     let points: Vec<egui::Pos2> = history
@@ -1096,22 +1306,25 @@ fn cpu_history_chart(ui: &mut egui::Ui, history: &VecDeque<Option<f32>>) {
     let mut mesh = egui::Mesh::default();
     for pair in points.windows(2) {
         let base = mesh.vertices.len() as u32;
-        mesh.colored_vertex(pair[0], CYAN.gamma_multiply(0.28));
-        mesh.colored_vertex(pair[1], CYAN.gamma_multiply(0.28));
+        mesh.colored_vertex(pair[0], colors().series_a.gamma_multiply(0.28));
+        mesh.colored_vertex(pair[1], colors().series_a.gamma_multiply(0.28));
         mesh.colored_vertex(
             egui::pos2(pair[1].x, plot.bottom()),
-            CYAN.gamma_multiply(0.03),
+            colors().series_a.gamma_multiply(0.03),
         );
         mesh.colored_vertex(
             egui::pos2(pair[0].x, plot.bottom()),
-            CYAN.gamma_multiply(0.03),
+            colors().series_a.gamma_multiply(0.03),
         );
         mesh.add_triangle(base, base + 1, base + 2);
         mesh.add_triangle(base, base + 2, base + 3);
     }
     painter.add(egui::Shape::mesh(mesh));
     if points.len() >= 2 {
-        painter.add(egui::Shape::line(points, egui::Stroke::new(1.8, CYAN)));
+        painter.add(egui::Shape::line(
+            points,
+            egui::Stroke::new(1.8, colors().series_a),
+        ));
     }
 }
 
@@ -1131,7 +1344,7 @@ fn network_card(
         ui,
         "Network traffic",
         &format!("{connected} connected · all interfaces"),
-        CYAN,
+        colors().series_a,
         |ui| {
             main_metric(
                 ui,
@@ -1142,14 +1355,18 @@ fn network_card(
                     .unwrap_or_else(|| "—".to_owned()),
                 "download",
             );
-            ui.label(RichText::new("Last 90 seconds").size(10.0).color(MUTED));
+            ui.label(
+                RichText::new("Last 90 seconds")
+                    .size(10.0)
+                    .color(colors().muted),
+            );
             network_chart(ui, download_history, upload_history);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("●").size(10.0).color(CYAN));
-                ui.label(RichText::new("Download").size(10.5).color(MUTED));
+                ui.label(RichText::new("●").size(10.0).color(colors().series_a));
+                ui.label(RichText::new("Download").size(10.5).color(colors().muted));
                 ui.add_space(6.0);
-                ui.label(RichText::new("●").size(10.0).color(PURPLE));
-                ui.label(RichText::new("Upload").size(10.5).color(MUTED));
+                ui.label(RichText::new("●").size(10.0).color(colors().series_b));
+                ui.label(RichText::new("Upload").size(10.5).color(colors().muted));
             });
             metric_row(
                 ui,
@@ -1189,7 +1406,7 @@ fn network_chart(
         let y = plot.bottom() - fraction * plot.height();
         painter.line_segment(
             [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
-            egui::Stroke::new(1.0, Color32::from_rgb(38, 39, 44)),
+            egui::Stroke::new(1.0, colors().border.gamma_multiply(0.75)),
         );
     }
     painter.text(
@@ -1197,7 +1414,7 @@ fn network_chart(
         egui::Align2::LEFT_TOP,
         rate(peak),
         egui::FontId::proportional(9.0),
-        MUTED,
+        colors().muted,
     );
     if peak == 0 && download.iter().all(Option::is_none) {
         painter.text(
@@ -1205,10 +1422,10 @@ fn network_chart(
             egui::Align2::CENTER_CENTER,
             "Waiting for network counters",
             egui::FontId::proportional(11.0),
-            MUTED,
+            colors().muted,
         );
     }
-    for (history, color) in [(download, CYAN), (upload, PURPLE)] {
+    for (history, color) in [(download, colors().series_a), (upload, colors().series_b)] {
         let mut previous = None;
         for (index, value) in history.iter().enumerate() {
             let current = value.map(|value| {
@@ -1241,7 +1458,7 @@ fn core_chart(ui: &mut egui::Ui, sample: &Sample) {
             egui::Align2::CENTER_CENTER,
             "Core readings unavailable",
             egui::FontId::proportional(11.0),
-            MUTED,
+            colors().muted,
         );
         return;
     }
@@ -1262,34 +1479,34 @@ fn core_chart(ui: &mut egui::Ui, sample: &Sample) {
             painter.rect_filled(
                 hit.shrink2(egui::vec2(1.0, 3.0)),
                 4.0,
-                PURPLE.gamma_multiply(0.10),
+                colors().series_b.gamma_multiply(0.10),
             );
         }
         let track = egui::Rect::from_min_max(
             egui::pos2(x - bar_width / 2.0, plot.top()),
             egui::pos2(x + bar_width / 2.0, plot.bottom()),
         );
-        painter.rect_filled(track, 2.0, Color32::from_rgb(54, 55, 60));
+        painter.rect_filled(track, 2.0, colors().border);
         let height = usage.clamp(0.0, 100.0) / 100.0 * plot.height();
         let fill = egui::Rect::from_min_max(
             egui::pos2(track.left(), plot.bottom() - height),
             track.right_bottom(),
         );
-        painter.rect_filled(fill, 2.0, PURPLE);
+        painter.rect_filled(fill, 2.0, colors().series_b);
         if cores.len() <= 24 || index % 2 == 0 {
             painter.text(
                 egui::pos2(x, plot.bottom() + 10.0),
                 egui::Align2::CENTER_CENTER,
                 format!("{}", index + 1),
                 egui::FontId::proportional(9.0),
-                MUTED,
+                colors().muted,
             );
         }
         response.on_hover_ui_at_pointer(|ui| {
             let detail = sample.core_details.get(index);
             egui::Frame::new()
-                .fill(PANEL)
-                .stroke(egui::Stroke::new(1.0, BORDER))
+                .fill(colors().panel)
+                .stroke(egui::Stroke::new(1.0, colors().border))
                 .corner_radius(6)
                 .inner_margin(egui::Margin::same(11))
                 .show(ui, |ui| {
@@ -1298,10 +1515,10 @@ fn core_chart(ui: &mut egui::Ui, sample: &Sample) {
                         RichText::new(format!("Logical processor {}", index + 1))
                             .size(12.0)
                             .strong()
-                            .color(TEXT),
+                            .color(colors().text),
                     );
                     if let Some(name) = detail.and_then(|detail| detail.physical_core.as_deref()) {
-                        ui.label(RichText::new(name).size(10.0).color(PURPLE));
+                        ui.label(RichText::new(name).size(10.0).color(colors().series_b));
                     }
                     ui.add_space(5.0);
                     ui.separator();
@@ -1336,7 +1553,7 @@ fn gpu_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>)
     let title = gpu
         .map(|gpu| gpu.name.as_str())
         .unwrap_or("No NVIDIA GPU detected");
-    card(ui, "Graphics load", title, PURPLE, |ui| {
+    card(ui, "Graphics load", title, colors().series_b, |ui| {
         main_metric(
             ui,
             &gpu.and_then(|gpu| gpu.usage)
@@ -1344,8 +1561,12 @@ fn gpu_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>)
                 .unwrap_or_else(|| "—".to_owned()),
             "GPU usage",
         );
-        ui.label(RichText::new("Last 90 seconds").size(10.0).color(MUTED));
-        sparkline(ui, history, PURPLE);
+        ui.label(
+            RichText::new("Last 90 seconds")
+                .size(10.0)
+                .color(colors().muted),
+        );
+        sparkline(ui, history, colors().series_b);
         metric_row(
             ui,
             "Temperature",
@@ -1378,11 +1599,15 @@ fn ram_card(ui: &mut egui::Ui, sample: &Sample, history: &VecDeque<Option<f32>>)
         ui,
         "Physical memory",
         "Used by Windows and applications",
-        CYAN,
+        colors().series_a,
         |ui| {
             main_metric(ui, &bytes(sample.ram_used), "used");
-            ui.label(RichText::new("Last 90 seconds").size(10.0).color(MUTED));
-            sparkline(ui, history, CYAN);
+            ui.label(
+                RichText::new("Last 90 seconds")
+                    .size(10.0)
+                    .color(colors().muted),
+            );
+            sparkline(ui, history, colors().series_a);
             metric_row(
                 ui,
                 "In use",
@@ -1403,7 +1628,7 @@ fn drives_card(ui: &mut egui::Ui, sample: &Sample) {
     let subtitle = primary
         .map(|drive| format!("{}  {}", drive.mount, drive.name))
         .unwrap_or_else(|| "No mounted volume".to_owned());
-    card(ui, "Disk space", &subtitle, GREEN, |ui| {
+    card(ui, "Disk space", &subtitle, colors().storage, |ui| {
         if let Some(drive) = primary {
             let used = drive.total.saturating_sub(drive.free);
             storage_ring(ui, percent(used, drive.total));
@@ -1412,7 +1637,7 @@ fn drives_card(ui: &mut egui::Ui, sample: &Sample) {
                     RichText::new(format!("{} free", bytes(drive.free)))
                         .size(20.0)
                         .strong()
-                        .color(TEXT),
+                        .color(colors().text),
                 );
                 ui.label(
                     RichText::new(format!(
@@ -1421,7 +1646,7 @@ fn drives_card(ui: &mut egui::Ui, sample: &Sample) {
                         bytes(drive.total)
                     ))
                     .size(10.5)
-                    .color(MUTED),
+                    .color(colors().muted),
                 );
             });
             ui.add_space(10.0);
@@ -1442,26 +1667,26 @@ fn drives_card(ui: &mut egui::Ui, sample: &Sample) {
                     .unwrap_or_else(|| "Unavailable".to_owned()),
             );
         } else {
-            ui.label(RichText::new("No drive readings available").color(MUTED));
+            ui.label(RichText::new("No drive readings available").color(colors().muted));
         }
     });
 }
 
 fn sensor_card(ui: &mut egui::Ui, sample: &Sample, tab: &mut Tab) {
-    egui::Frame::new().fill(PANEL).stroke(egui::Stroke::new(1.0, BORDER))
+    egui::Frame::new().fill(colors().panel).stroke(egui::Stroke::new(1.0, colors().border))
         .corner_radius(egui::CornerRadius::same(7)).inner_margin(egui::Margin::same(15))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Hardware sensors").size(13.0).strong().color(TEXT));
+                ui.label(RichText::new("Hardware sensors").size(13.0).strong().color(colors().text));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(if sample.sensor_online { "Provider connected" } else { "Optional provider offline" }).size(11.0).color(if sample.sensor_online { GREEN } else { MUTED }));
+                    ui.label(RichText::new(if sample.sensor_online { "Provider connected" } else { "Optional provider offline" }).size(11.0).color(if sample.sensor_online { colors().success } else { colors().muted }));
                 });
             });
             ui.add_space(4.0);
             if !sample.sensor_online {
-                ui.label(RichText::new("The bundled sensor bridge is starting, or this hardware does not expose additional sensors. Supported temperatures, fans, power, and drive sensors appear here.").size(11.0).color(MUTED));
+                ui.label(RichText::new("The bundled sensor bridge is starting, or this hardware does not expose additional sensors. Supported temperatures, fans, power, and drive sensors appear here.").size(11.0).color(colors().muted));
             } else {
-                ui.label(RichText::new(format!("{} additional readings are reporting", sample.sensors.len())).size(11.0).color(MUTED));
+                ui.label(RichText::new(format!("{} additional readings are reporting", sample.sensors.len())).size(11.0).color(colors().muted));
             }
             ui.add_space(8.0);
             if ui.button("Browse all sensors").clicked() {
@@ -1477,18 +1702,23 @@ fn sensor_table(
     search: &mut String,
 ) {
     egui::Frame::new()
-        .fill(PANEL)
-        .stroke(egui::Stroke::new(1.0, BORDER))
+        .fill(colors().panel)
+        .stroke(egui::Stroke::new(1.0, colors().border))
         .corner_radius(egui::CornerRadius::same(7))
         .inner_margin(egui::Margin::same(16))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new("All sensors").size(22.0).strong().color(TEXT));
+                    ui.label(
+                        RichText::new("All sensors")
+                            .size(22.0)
+                            .strong()
+                            .color(colors().text),
+                    );
                     ui.label(
                         RichText::new("Current, minimum, maximum, and average since launch")
                             .size(12.0)
-                            .color(MUTED),
+                            .color(colors().muted),
                     );
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1511,9 +1741,9 @@ fn sensor_table(
                     .num_columns(5)
                     .spacing([12.0, 5.0])
                     .show(ui, |ui| {
-                        table_cell(ui, "Reading", 300.0, MUTED, true);
+                        table_cell(ui, "Reading", 300.0, colors().muted, true);
                         for heading in ["Current", "Min", "Max", "Average"] {
-                            table_cell(ui, heading, 118.0, MUTED, true);
+                            table_cell(ui, heading, 118.0, colors().muted, true);
                         }
                         ui.end_row();
                         for reading in readings {
@@ -1524,15 +1754,15 @@ fn sensor_table(
                                 continue;
                             }
                             if reading.group != last_group {
-                                table_cell(ui, &reading.group, 300.0, CYAN, true);
+                                table_cell(ui, &reading.group, 300.0, colors().series_a, true);
                                 for _ in 0..4 {
                                     ui.label("");
                                 }
                                 ui.end_row();
                                 last_group = &reading.group;
                             }
-                            table_cell(ui, &reading.name, 300.0, TEXT, false);
-                            table_cell(ui, &reading.formatted(), 118.0, TEXT, true);
+                            table_cell(ui, &reading.name, 300.0, colors().text, false);
+                            table_cell(ui, &reading.formatted(), 118.0, colors().text, true);
                             let stat = stats.get(&reading.key);
                             for value in [
                                 stat.map(|s| s.min),
@@ -1542,7 +1772,7 @@ fn sensor_table(
                                 let text = value
                                     .map(|value| reading.format_value(value))
                                     .unwrap_or_else(|| "—".to_owned());
-                                table_cell(ui, &text, 118.0, MUTED, false);
+                                table_cell(ui, &text, 118.0, colors().muted, false);
                             }
                             ui.end_row();
                         }

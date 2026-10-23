@@ -2,6 +2,8 @@
 
 A native Windows performance monitor written in Rust. It samples once per second and keeps the interface idle between updates. The dark overview has four telemetry cards for drive, memory, graphics, and network activity. The processor panel pairs a 90-second total usage chart with per-logical-processor bars. Hover a logical processor bar to see its usage, current clock, and physical-core temperature. If only package temperature is available, the hover card labels it as such. The navigation rail opens a searchable All sensors table with current, minimum, maximum, and average readings for the current Perfm session.
 
+The Settings icon in the navigation rail opens 13 color themes: Perfm Original and the 12 palettes from the color-palettes collection. Selecting a theme updates the interface immediately. Perfm saves the choice in `%LOCALAPPDATA%\Perfm\settings.json` and restores it on the next launch. Each palette keeps the dashboard dark and uses its supplied neutral and accent shades.
+
 ## Readings
 
 - CPU: total and per-logical-processor usage, current Windows processor frequency, temperature and package power when a sensor provider exposes them.
