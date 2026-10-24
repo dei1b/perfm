@@ -1,0 +1,68 @@
+name: Windows release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        shell: pwsh
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Check release version
+        shell: pwsh
+        run: |
+          $manifest = Get-Content Cargo.toml -Raw
+          $match = [regex]::Match($manifest, '(?m)^version\s*=\s*"([^"]+)"')
+          if (-not $match.Success -or "v$($match.Groups[1].Value)" -ne $env:GITHUB_REF_NAME) {
+            throw "Tag $env:GITHUB_REF_NAME must match the version in Cargo.toml."
+          }
+
+      - name: Test and build Rust app
+        shell: pwsh
+        run: |
+          cargo +stable test --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
+          cargo +stable build --release --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Rust release build failed.' }
+
+      - name: Package app and NativeAOT sensor helper
+        shell: pwsh
+        run: |
+          & .\scripts\package.ps1 -OutputDirectory '.\dist\Perfm-Windows-x64'
+          if (-not (Test-Path '.\dist\Perfm-Windows-x64\Perfm.exe') -or
+              -not (Test-Path '.\dist\Perfm-Windows-x64\SensorBridge\Perfm.SensorBridge.exe')) {
+            throw 'The release package is incomplete.'
+          }
+
+      - name: Create ZIP and checksum
+        shell: pwsh
+        run: |
+          $archive = "Perfm-$env:GITHUB_REF_NAME-Windows-x64.zip"
+          Compress-Archive -Path '.\dist\Perfm-Windows-x64\*' -DestinationPath ".\dist\$archive"
+          $hash = (Get-FileHash ".\dist\$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content ".\dist\$archive.sha256" -Encoding ascii
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $archive = "Perfm-$env:GITHUB_REF_NAME-Windows-x64.zip"
+          gh release create $env:GITHUB_REF_NAME ".\dist\$archive" ".\dist\$archive.sha256" --verify-tag --generate-notes --notes-file '.github/release-notes.md'
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed.' }

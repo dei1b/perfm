@@ -54,7 +54,10 @@ Perfm is currently supported on **64-bit Windows**.
 
 ## Quick start
 
-Download or build a package, then launch:
+Download the latest `Perfm-<version>-Windows-x64.zip` from
+[GitHub Releases](https://github.com/dei1b/perfm/releases), extract the entire
+ZIP, and run `Perfm.exe`. Keep the `SensorBridge` folder beside the executable.
+Alternatively, build a package locally and launch:
 
 ```text
 dist\Perfm-Integrated\Perfm.exe
@@ -64,6 +67,23 @@ The packaged executable starts the sensor bridge from the adjacent
 `SensorBridge` directory when it is present. Core Windows, storage, network,
 and NVML readings can still work when optional hardware sensors are
 unavailable.
+
+### Publishing a GitHub release
+
+The [Windows release workflow](.github/workflows/release.yml) builds and tests
+Perfm, packages the NativeAOT sensor bridge, and publishes a ZIP and SHA-256
+checksum when a version tag is pushed. Update the version in `Cargo.toml`,
+commit and push your changes, then push a matching tag. For example, when the
+manifest version is `0.1.0`:
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Watch the run in the repository's **Actions** tab. After it succeeds, the ZIP
+appears under **Releases**. Do not reuse a published version tag; bump the
+manifest version for the next release.
 
 To request administrator access for sensors that require it, run:
 
